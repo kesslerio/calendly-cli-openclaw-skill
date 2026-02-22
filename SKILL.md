@@ -41,6 +41,7 @@ calendly cancel-event --event-uuid <UUID> --reason "Rescheduling needed"
 
 ### Invitees
 - `list-event-invitees` - List invitees for an event (requires --event-uuid)
+- `batch-event-invitees` - Batch lookup invitees for multiple events (repeat `--event-uri`)
 - `search-invitees` - Search events by invitee email across paginated results
 
 ### Organization
@@ -102,6 +103,13 @@ calendly list-events \
 # Get event details
 calendly get-event \
   --event-uuid "<EVENT_UUID>" \
+  -o json
+
+# Batch invitee lookup for multiple events
+calendly batch-event-invitees \
+  --event-uri "https://api.calendly.com/scheduled_events/<EVENT_UUID_1>" \
+  --event-uri "https://api.calendly.com/scheduled_events/<EVENT_UUID_2>" \
+  --max-invitee-fetches 25 \
   -o json
 
 # Cancel with reason

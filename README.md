@@ -85,6 +85,22 @@ Supports pagination with `--page-size` and `--max-pages` for large orgs.
 This command resolves team members from organization memberships, scans each member's events in bounded pages, and returns matching events with member context.
 `--max-membership-pages` defaults to `10`; if more data exists than the configured scan limits allow, output meta includes `has_more: true` and a `truncation_reason`.
 
+### Batch Invitee Lookup by Event URI
+
+```bash
+./calendly batch-event-invitees \
+  --event-uri "https://api.calendly.com/scheduled_events/<EVENT_UUID_1>" \
+  --event-uri "https://api.calendly.com/scheduled_events/<EVENT_UUID_2>" \
+  --max-invitee-fetches 25
+```
+
+Supports repeated `--event-uri` flags plus `--raw` JSON (`event_uri` or `event_uris`), dedupes duplicate URIs in stable order, and returns normalized output:
+- `collection`: one entry per requested event URI, with per-event `error` when lookup fails
+- `meta.requested`: number of deduped input event URIs
+- `meta.processed`: successful events
+- `meta.failed`: failed events
+- `meta.truncated`: `true` when the global fetch cap prevented full completion
+
 ### Get Event Details
 
 ```bash
@@ -143,6 +159,7 @@ Signing secret handling guidance:
 - `list-event-invitees` - List invitees for a specific event
 - `search-invitees` - Search events by invitee email across paginated results
 - `search-team` - Search invitee email across team member calendars
+- `batch-event-invitees` - Batch lookup invitees for multiple scheduled event URIs
 - `list-organization-memberships` - List organization memberships
 
 ### OAuth

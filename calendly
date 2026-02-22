@@ -8,6 +8,7 @@ import { buildOrganizationMembershipParams } from './src/organization-membership
 import { filterInviteesByEmail, getCountPageWindow, getTeamSearchTruncationReason, normalizeTeamSearchOptions, toMembershipUserUri, toTeamMemberContext } from './search-team-helpers';
 import { normalizeDateRange } from './src/date-range';
 import { normalizeListEventsQuery } from './src/list-events-query';
+import { fetchBatchEventInvitees, normalizeBatchEventInviteesQuery } from './src/batch-event-invitees';
 import {
 	eventInviteeCount,
 	extractInviteePaginationMeta,
@@ -266,6 +267,12 @@ const generatorTools = [
     "flags": "--event-uuid <event-uuid> [--raw <json>]"
   },
   {
+    "name": "batch-event-invitees",
+    "description": "Batch lookup invitees for multiple scheduled event URIs",
+    "usage": "batch-event-invitees --event-uri <event-uri> [--event-uri <event-uri>] [--status <status:active|canceled>] [--email <email>] [--count <count:number>] [--max-invitee-fetches <max-invitee-fetches:number>] [--raw <json>]",
+    "flags": "--event-uri <event-uri> [--event-uri <event-uri>] [--status <status:active|canceled>] [--email <email>] [--count <count:number>] [--max-invitee-fetches <max-invitee-fetches:number>] [--raw <json>]"
+  },
+  {
     "name": "list-event-invitees",
     "description": "List invitees for a specific event",
     "usage": "list-event-invitees --event-uuid <event-uuid> [--status <status:active|canceled>] [--email <email>] [--count <count:number>] [--raw <json>]",
@@ -368,6 +375,7 @@ const commandSignatures: Record<string, string> = {
   "search-invitees": "function search_invitees(email: string, user_uri?: string, organization_uri?: string, status?: \"active\" | \"canceled\", min_start_time?: string, max_start_time?: string, page_size?: number, max_pages?: number);",
   "search-team": "function search_team(email: string, min_start_time?: string, max_start_time?: string, status?: \"active\" | \"canceled\", organization_uri?: string, count?: number, max_membership_pages?: number);",
   "get-event": "function get_event(event_uuid: string);",
+  "batch-event-invitees": "function batch_event_invitees(event_uri: string[], status?: \"active\" | \"canceled\", email?: string, count?: number, max_invitee_fetches?: number);",
   "list-event-invitees": "function list_event_invitees(event_uuid: string, status?: \"active\" | \"canceled\", email?: string, count?: number);",
   "cancel-event": "function cancel_event(event_uuid: string, reason?: string);",
   "list-organization-memberships": "function list_organization_memberships(user_uri?: string, organization_uri?: string, email?: string, count?: number);"
@@ -391,14 +399,24 @@ function parseBooleanFlag(value: string): boolean {
 	throw new Error(`Invalid boolean value "${value}". Use true or false.`);
 }
 
+function collectRepeatedString(value: string, previous: string[]): string[] {
+	return [...previous, value];
+}
+
 async function fetchEventInviteesPage(
 	apiKey: string,
 	eventUuid: string,
 	timeout: number,
-	pageToken?: string
+	pageToken?: string,
+	options?: { status?: string; email?: string; count?: number }
 ): Promise<{ collection: unknown[]; next_page_token?: string }> {
 	const params = new URLSearchParams();
-	params.append('count', '100');
+	const normalizedCount = typeof options?.count === 'number' && Number.isFinite(options.count)
+		? Math.max(1, Math.min(100, Math.trunc(options.count)))
+		: 100;
+	params.append('count', String(normalizedCount));
+	if (typeof options?.status === 'string' && options.status.length > 0) params.append('status', options.status);
+	if (typeof options?.email === 'string' && options.email.length > 0) params.append('email', options.email);
 	if (pageToken) params.append('page_token', pageToken);
 	const response = await axios.get(
 		`https://api.calendly.com/scheduled_events/${eventUuid}/invitees?${params.toString()}`,
@@ -414,6 +432,27 @@ async function fetchEventInviteesPage(
 		collection: Array.isArray(response.data?.collection) ? response.data.collection : [],
 		next_page_token: response.data?.pagination?.next_page_token,
 	};
+}
+
+async function fetchBatchEventInviteesResult(query: Record<string, unknown>, timeout: number): Promise<any> {
+	const apiKey = process.env.CALENDLY_API_KEY;
+	if (!apiKey) throw new Error('CALENDLY_API_KEY environment variable is required');
+
+	const normalizedQuery = normalizeBatchEventInviteesQuery(
+		{
+			eventUri: Array.isArray(query.event_uri) ? (query.event_uri as string[]) : undefined,
+			status: query.status as 'active' | 'canceled' | undefined,
+			email: query.email as string | undefined,
+			count: query.count as number | undefined,
+			maxInviteeFetches: query.max_invitee_fetches as number | undefined,
+		},
+		query
+	);
+
+	return fetchBatchEventInvitees(
+		normalizedQuery,
+		(eventUuid, pageToken, options) => fetchEventInviteesPage(apiKey, eventUuid, timeout, pageToken, options)
+	);
 }
 
 async function fetchScheduledEventsWithInvitees(query: Record<string, unknown>, timeout: number): Promise<any> {
@@ -1006,6 +1045,38 @@ program
 		}
 	})
 	.addHelpText('after', () => '\nExample:\n  ' + "mcporter call calendly.get_event(event_uuid: \"example-id\")");
+
+program
+	.command("batch-event-invitees")
+	.summary("batch-event-invitees --event-uri <event-uri> [--event-uri <event-uri>] [--status <status:active|canceled>] [--email <email>] [--count <count:number>] [--max-invitee-fetches <max-invitee-fetches:number>] [--raw <json>]")
+	.description("Batch lookup invitees for multiple scheduled event URIs")
+	.usage("--event-uri <event-uri> [--event-uri <event-uri>] [--status <status:active|canceled>] [--email <email>] [--count <count:number>] [--max-invitee-fetches <max-invitee-fetches:number>] [--raw <json>]")
+	.option('--raw <json>', 'Provide raw JSON arguments to the tool, bypassing flag parsing.')
+	.option("--event-uri <event-uri>", "Scheduled event URI; repeat for multiple events", collectRepeatedString, [] as string[])
+	.option("--status <status:active|canceled>", "Filter invitees by status (choices: active, canceled; example: active)")
+	.option("--email <email>", "Optional invitee email filter")
+	.option("--count <count:number>", "Number of invitees per page (default 100, max 100) (example: 25)", (value) => parseFloat(value))
+	.option("--max-invitee-fetches <max-invitee-fetches:number>", "Safety cap for total invitee fetch calls across all events (default 25)", (value) => parseInt(value, 10))
+	.alias("batch_event_invitees")
+	.action(async (cmdOpts) => {
+		const globalOptions = program.opts();
+		try {
+			const args = cmdOpts.raw ? JSON.parse(cmdOpts.raw) : ({} as Record<string, unknown>);
+			if (Array.isArray(cmdOpts.eventUri) && cmdOpts.eventUri.length > 0) args.event_uri = cmdOpts.eventUri;
+			if (cmdOpts.status !== undefined) args.status = cmdOpts.status;
+			if (cmdOpts.email !== undefined) args.email = cmdOpts.email;
+			if (cmdOpts.count !== undefined) args.count = cmdOpts.count;
+			if (cmdOpts.maxInviteeFetches !== undefined) args.max_invitee_fetches = cmdOpts.maxInviteeFetches;
+
+			const result = await fetchBatchEventInviteesResult(args, globalOptions.timeout || 30000);
+			printResult(result, globalOptions.output ?? 'text');
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			console.error(`Error: ${message}`);
+			process.exit(1);
+		}
+	})
+	.addHelpText('after', () => '\nExample:\n  ' + "./calendly batch-event-invitees --event-uri https://api.calendly.com/scheduled_events/EVT_1 --event-uri https://api.calendly.com/scheduled_events/EVT_2");
 
 program
 	.command("list-event-invitees")
