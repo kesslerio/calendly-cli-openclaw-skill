@@ -272,6 +272,30 @@ const generatorTools = [
     "description": "List organization memberships for the authenticated user",
     "usage": "list-organization-memberships [--user-uri <user-uri>] [--organization-uri <organization-uri>] [--email <email>] [--count <count:number>] [--raw <json>]",
     "flags": "[--user-uri <user-uri>] [--organization-uri <organization-uri>] [--email <email>] [--count <count:number>] [--raw <json>]"
+  },
+  {
+    "name": "list-webhook-subscriptions",
+    "description": "List webhook subscriptions",
+    "usage": "list-webhook-subscriptions [--organization-uri <organization-uri>] [--scope <scope:user|organization>] [--count <count:number>]",
+    "flags": "[--organization-uri <organization-uri>] [--scope <scope:user|organization>] [--count <count:number>]"
+  },
+  {
+    "name": "get-webhook-subscription",
+    "description": "Get details for a webhook subscription",
+    "usage": "get-webhook-subscription --webhook-subscription-uri <webhook-subscription-uri>",
+    "flags": "--webhook-subscription-uri <webhook-subscription-uri>"
+  },
+  {
+    "name": "create-webhook-subscription",
+    "description": "Create a webhook subscription",
+    "usage": "create-webhook-subscription --url <url> --events <events> --organization-uri <organization-uri> [--scope <scope:user|organization>] [--user-uri <user-uri>] [--signing-key <signing-key>]",
+    "flags": "--url <url> --events <events> --organization-uri <organization-uri> [--scope <scope:user|organization>] [--user-uri <user-uri>] [--signing-key <signing-key>]"
+  },
+  {
+    "name": "delete-webhook-subscription",
+    "description": "Delete a webhook subscription",
+    "usage": "delete-webhook-subscription --webhook-subscription-uri <webhook-subscription-uri>",
+    "flags": "--webhook-subscription-uri <webhook-subscription-uri>"
   }
 ] as const;
 const embeddedMetadata = {
@@ -1022,6 +1046,164 @@ program
 		}
 	})
 	.addHelpText('after', () => '\nExample:\n  ' + "mcporter call calendly.list_organization_memberships(count: 1)");
+
+program
+	.command("list-webhook-subscriptions")
+	.summary("list-webhook-subscriptions [--organization-uri <organization-uri>] [--scope <scope:user|organization>] [--count <count:number>]")
+	.description("List webhook subscriptions")
+	.usage("[--organization-uri <organization-uri>] [--scope <scope:user|organization>] [--count <count:number>]")
+	.option("--organization-uri <organization-uri>", "Organization URI to filter subscriptions")
+	.option("--scope <scope:user|organization>", "Filter by scope (choices: user, organization)")
+	.option("--count <count:number>", "Number of subscriptions to return (default 20, max 100)", (value) => parseInt(value, 10))
+	.action(async (cmdOpts) => {
+		const globalOptions = program.opts();
+		try {
+			const apiKey = process.env.CALENDLY_API_KEY;
+			if (!apiKey) throw new Error('CALENDLY_API_KEY environment variable is required');
+
+			const urlParams = new URLSearchParams();
+			if (cmdOpts.organizationUri) urlParams.append('organization', cmdOpts.organizationUri);
+			if (cmdOpts.scope) urlParams.append('scope', cmdOpts.scope);
+			if (cmdOpts.count !== undefined) urlParams.append('count', String(cmdOpts.count));
+
+			const response = await axios.get(
+				`https://api.calendly.com/webhook_subscriptions?${urlParams.toString()}`,
+				{
+					headers: {
+						'Authorization': `Bearer ${apiKey}`,
+						'Content-Type': 'application/json',
+					},
+					timeout: globalOptions.timeout || 30000,
+				}
+			);
+
+			printResult(response.data, globalOptions.output ?? 'text');
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			console.error(`Error: ${message}`);
+			process.exit(1);
+		}
+	})
+	.addHelpText('after', () => '\nExample:\n  ' + "./calendly list-webhook-subscriptions --organization-uri https://api.calendly.com/organizations/ORG_ID");
+
+program
+	.command("get-webhook-subscription")
+	.summary("get-webhook-subscription --webhook-subscription-uri <webhook-subscription-uri>")
+	.description("Get details for a webhook subscription")
+	.usage("--webhook-subscription-uri <webhook-subscription-uri>")
+	.requiredOption("--webhook-subscription-uri <webhook-subscription-uri>", "Webhook subscription URI")
+	.action(async (cmdOpts) => {
+		const globalOptions = program.opts();
+		try {
+			const apiKey = process.env.CALENDLY_API_KEY;
+			if (!apiKey) throw new Error('CALENDLY_API_KEY environment variable is required');
+			const webhookId = String(cmdOpts.webhookSubscriptionUri).split('/').pop();
+
+			const response = await axios.get(
+				`https://api.calendly.com/webhook_subscriptions/${encodeURIComponent(String(webhookId))}`,
+				{
+					headers: {
+						'Authorization': `Bearer ${apiKey}`,
+						'Content-Type': 'application/json',
+					},
+					timeout: globalOptions.timeout || 30000,
+				}
+			);
+
+			printResult(response.data, globalOptions.output ?? 'text');
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			console.error(`Error: ${message}`);
+			process.exit(1);
+		}
+	})
+	.addHelpText('after', () => '\nExample:\n  ' + "./calendly get-webhook-subscription --webhook-subscription-uri https://api.calendly.com/webhook_subscriptions/WH_ID");
+
+program
+	.command("create-webhook-subscription")
+	.summary("create-webhook-subscription --url <url> --events <events> --organization-uri <organization-uri> [--scope <scope:user|organization>] [--user-uri <user-uri>] [--signing-key <signing-key>]")
+	.description("Create a webhook subscription")
+	.usage("--url <url> --events <events> --organization-uri <organization-uri> [--scope <scope:user|organization>] [--user-uri <user-uri>] [--signing-key <signing-key>]")
+	.requiredOption("--url <url>", "Webhook callback URL")
+	.requiredOption("--events <events>", "Comma-separated events (e.g. invitee.created,invitee.canceled)")
+	.requiredOption("--organization-uri <organization-uri>", "Organization URI")
+	.option("--scope <scope:user|organization>", "Subscription scope (choices: user, organization)", "organization")
+	.option("--user-uri <user-uri>", "User URI (required when --scope user)")
+	.option("--signing-key <signing-key>", "Signing key for signature verification")
+	.action(async (cmdOpts) => {
+		const globalOptions = program.opts();
+		try {
+			const apiKey = process.env.CALENDLY_API_KEY;
+			if (!apiKey) throw new Error('CALENDLY_API_KEY environment variable is required');
+
+			const payload: Record<string, unknown> = {
+				url: cmdOpts.url,
+				events: String(cmdOpts.events).split(',').map((e) => e.trim()).filter(Boolean),
+				scope: cmdOpts.scope,
+				organization: cmdOpts.organizationUri,
+			};
+			if (cmdOpts.scope === 'user' && !cmdOpts.userUri) {
+				throw new Error('--user-uri is required when --scope user');
+			}
+			if (cmdOpts.userUri) payload.user = cmdOpts.userUri;
+			if (cmdOpts.signingKey) payload.signing_key = cmdOpts.signingKey;
+
+			const response = await axios.post('https://api.calendly.com/webhook_subscriptions', payload, {
+				headers: {
+					'Authorization': `Bearer ${apiKey}`,
+					'Content-Type': 'application/json',
+				},
+				timeout: globalOptions.timeout || 30000,
+			});
+
+			printResult(response.data, globalOptions.output ?? 'text');
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			console.error(`Error: ${message}`);
+			process.exit(1);
+		}
+	})
+	.addHelpText('after', () => '\nExample:\n  ' + "./calendly create-webhook-subscription --url https://example.com/webhook --events invitee.created,invitee.canceled --organization-uri https://api.calendly.com/organizations/ORG_ID --scope organization");
+
+program
+	.command("delete-webhook-subscription")
+	.summary("delete-webhook-subscription --webhook-subscription-uri <webhook-subscription-uri>")
+	.description("Delete a webhook subscription")
+	.usage("--webhook-subscription-uri <webhook-subscription-uri>")
+	.requiredOption("--webhook-subscription-uri <webhook-subscription-uri>", "Webhook subscription URI")
+	.action(async (cmdOpts) => {
+		const globalOptions = program.opts();
+		try {
+			const apiKey = process.env.CALENDLY_API_KEY;
+			if (!apiKey) throw new Error('CALENDLY_API_KEY environment variable is required');
+			const webhookId = String(cmdOpts.webhookSubscriptionUri).split('/').pop();
+
+				const response = await axios.delete(
+					`https://api.calendly.com/webhook_subscriptions/${encodeURIComponent(String(webhookId))}`,
+					{
+						headers: {
+						'Authorization': `Bearer ${apiKey}`,
+						'Content-Type': 'application/json',
+					},
+					timeout: globalOptions.timeout || 30000,
+				}
+			);
+
+				printResult(
+					{
+						deleted: true,
+						webhook_subscription_uri: String(cmdOpts.webhookSubscriptionUri),
+						status: response.status,
+					},
+					globalOptions.output ?? 'text'
+				);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			console.error(`Error: ${message}`);
+			process.exit(1);
+		}
+	})
+	.addHelpText('after', () => '\nExample:\n  ' + "./calendly delete-webhook-subscription --webhook-subscription-uri https://api.calendly.com/webhook_subscriptions/WH_ID");
 
 program
 	.command('__mcporter_inspect', { hidden: true })

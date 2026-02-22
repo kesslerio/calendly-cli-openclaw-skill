@@ -106,5 +106,230 @@ if [[ $# -ge 2 && "$1" == "invitees" && "$2" == "list" ]]; then
     exec "$CALENDLY_BIN" "${args[@]}"
 fi
 
+if [[ $# -ge 2 && ( "$1" == "webhook-subscriptions" || "$1" == "webhooks" ) ]]; then
+    action="$2"
+    shift 2
+
+    case "$action" in
+        list)
+            if [[ $# -ge 1 && ( "$1" == "--help" || "$1" == "-h" ) ]]; then
+                cat <<'EOF'
+Usage: webhook-subscriptions list [--organization-uri URI] [--scope user|organization] [--count N] [--json]
+EOF
+                exit 0
+            fi
+
+            organization_uri=""
+            scope=""
+            count=""
+            json_mode=false
+
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --organization-uri)
+                        organization_uri="$2"
+                        shift 2
+                        ;;
+                    --scope)
+                        scope="$2"
+                        shift 2
+                        ;;
+                    --count)
+                        count="$2"
+                        shift 2
+                        ;;
+                    --json)
+                        json_mode=true
+                        shift
+                        ;;
+                    *)
+                        shift
+                        ;;
+                esac
+            done
+
+            args=("list-webhook-subscriptions")
+            if [[ -n "$organization_uri" ]]; then
+                args+=("--organization-uri" "$organization_uri")
+            fi
+            if [[ -n "$scope" ]]; then
+                args+=("--scope" "$scope")
+            fi
+            if [[ -n "$count" ]]; then
+                args+=("--count" "$count")
+            fi
+            if [[ "$json_mode" == true ]]; then
+                args+=("-o" "json")
+            fi
+
+            exec "$CALENDLY_BIN" "${args[@]}"
+            ;;
+        get)
+            if [[ $# -ge 1 && ( "$1" == "--help" || "$1" == "-h" ) ]]; then
+                cat <<'EOF'
+Usage: webhook-subscriptions get --webhook-subscription-uri URI [--json]
+EOF
+                exit 0
+            fi
+
+            webhook_subscription_uri=""
+            json_mode=false
+
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --webhook-subscription-uri)
+                        webhook_subscription_uri="$2"
+                        shift 2
+                        ;;
+                    --json)
+                        json_mode=true
+                        shift
+                        ;;
+                    *)
+                        shift
+                        ;;
+                esac
+            done
+
+            if [[ -z "$webhook_subscription_uri" ]]; then
+                echo "ERROR: --webhook-subscription-uri required" >&2
+                exit 1
+            fi
+
+            args=("get-webhook-subscription" "--webhook-subscription-uri" "$webhook_subscription_uri")
+            if [[ "$json_mode" == true ]]; then
+                args+=("-o" "json")
+            fi
+
+            exec "$CALENDLY_BIN" "${args[@]}"
+            ;;
+        create)
+            if [[ $# -ge 1 && ( "$1" == "--help" || "$1" == "-h" ) ]]; then
+                cat <<'EOF'
+Usage: webhook-subscriptions create --url URL --events EVENT1,EVENT2 --organization-uri URI [--scope user|organization] [--user-uri URI] [--signing-key KEY] [--json]
+EOF
+                exit 0
+            fi
+
+            url=""
+            events=""
+            organization_uri=""
+            scope=""
+            user_uri=""
+            signing_key=""
+            json_mode=false
+
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --url)
+                        url="$2"
+                        shift 2
+                        ;;
+                    --events)
+                        events="$2"
+                        shift 2
+                        ;;
+                    --organization-uri)
+                        organization_uri="$2"
+                        shift 2
+                        ;;
+                    --scope)
+                        scope="$2"
+                        shift 2
+                        ;;
+                    --user-uri)
+                        user_uri="$2"
+                        shift 2
+                        ;;
+                    --signing-key)
+                        signing_key="$2"
+                        shift 2
+                        ;;
+                    --json)
+                        json_mode=true
+                        shift
+                        ;;
+                    *)
+                        shift
+                        ;;
+                esac
+            done
+
+            if [[ -z "$url" || -z "$events" || -z "$organization_uri" ]]; then
+                echo "ERROR: --url, --events, and --organization-uri are required" >&2
+                exit 1
+            fi
+            if [[ "$scope" == "user" && -z "$user_uri" ]]; then
+                echo "ERROR: --user-uri is required when --scope user" >&2
+                exit 1
+            fi
+
+            args=(
+                "create-webhook-subscription"
+                "--url" "$url"
+                "--events" "$events"
+                "--organization-uri" "$organization_uri"
+            )
+            if [[ -n "$scope" ]]; then
+                args+=("--scope" "$scope")
+            fi
+            if [[ -n "$user_uri" ]]; then
+                args+=("--user-uri" "$user_uri")
+            fi
+            if [[ -n "$signing_key" ]]; then
+                args+=("--signing-key" "$signing_key")
+            fi
+            if [[ "$json_mode" == true ]]; then
+                args+=("-o" "json")
+            fi
+
+            exec "$CALENDLY_BIN" "${args[@]}"
+            ;;
+        delete)
+            if [[ $# -ge 1 && ( "$1" == "--help" || "$1" == "-h" ) ]]; then
+                cat <<'EOF'
+Usage: webhook-subscriptions delete --webhook-subscription-uri URI [--json]
+EOF
+                exit 0
+            fi
+
+            webhook_subscription_uri=""
+            json_mode=false
+
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --webhook-subscription-uri)
+                        webhook_subscription_uri="$2"
+                        shift 2
+                        ;;
+                    --json)
+                        json_mode=true
+                        shift
+                        ;;
+                    *)
+                        shift
+                        ;;
+                esac
+            done
+
+            if [[ -z "$webhook_subscription_uri" ]]; then
+                echo "ERROR: --webhook-subscription-uri required" >&2
+                exit 1
+            fi
+
+            args=("delete-webhook-subscription" "--webhook-subscription-uri" "$webhook_subscription_uri")
+            if [[ "$json_mode" == true ]]; then
+                args+=("-o" "json")
+            fi
+
+            exec "$CALENDLY_BIN" "${args[@]}"
+            ;;
+        *)
+            echo "ERROR: unsupported webhook action '$action' (use: list|get|create|delete)" >&2
+            exit 1
+            ;;
+    esac
+fi
+
 # Passthrough for normal commands
 exec "$CALENDLY_BIN" "$@"

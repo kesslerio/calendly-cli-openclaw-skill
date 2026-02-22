@@ -83,6 +83,42 @@ This command resolves team members from organization memberships, scans each mem
 ./calendly cancel-event --event-uuid "<EVENT_UUID>" --reason "Rescheduling needed"
 ```
 
+### Webhook Subscriptions
+
+```bash
+# Create
+./calendly create-webhook-subscription \
+  --url "https://example.com/calendly/webhooks" \
+  --events "invitee.created,invitee.canceled" \
+  --organization-uri "https://api.calendly.com/organizations/<ORG_UUID>" \
+  --scope organization \
+  --signing-key "$CALENDLY_WEBHOOK_SIGNING_KEY"
+
+# List
+./calendly list-webhook-subscriptions \
+  --organization-uri "https://api.calendly.com/organizations/<ORG_UUID>"
+
+# Get
+./calendly get-webhook-subscription \
+  --webhook-subscription-uri "https://api.calendly.com/webhook_subscriptions/<SUBSCRIPTION_UUID>"
+
+# Delete
+./calendly delete-webhook-subscription \
+  --webhook-subscription-uri "https://api.calendly.com/webhook_subscriptions/<SUBSCRIPTION_UUID>"
+```
+
+Store webhook secrets in env vars and verify signatures in your receiver:
+
+```bash
+export CALENDLY_WEBHOOK_SIGNING_KEY="<long-random-secret>"
+```
+
+Signing secret handling guidance:
+- Treat `CALENDLY_WEBHOOK_SIGNING_KEY` as sensitive credential material and keep it out of git.
+- Inject it at runtime from your secret manager (or secure environment), not from hardcoded files.
+- Rotate the key if leaked and recreate affected subscriptions with the new key.
+- If you set `--scope user`, also pass `--user-uri "https://api.calendly.com/users/<USER_UUID>"`.
+
 ### Event Management
 
 - `get-current-user` - Get authenticated user details
