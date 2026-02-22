@@ -191,6 +191,7 @@ export async function hydrateMissingInvitees(
 				eventTruncated = true;
 				break;
 			}
+			fetchesUsed += 1;
 			let page: InviteesPage;
 			try {
 				page = await fetchInviteesPage(eventUuid, pageToken);
@@ -199,7 +200,6 @@ export async function hydrateMissingInvitees(
 				eventErrorMessage = error instanceof Error ? error.message : String(error);
 				break;
 			}
-			fetchesUsed += 1;
 			hydratedInvitees.push(...normalizeInvitees(page?.collection));
 			pageToken = typeof page?.next_page_token === 'string' && page.next_page_token.length > 0
 				? page.next_page_token

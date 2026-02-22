@@ -240,4 +240,28 @@ describe('hydrateMissingInvitees', () => {
 		expect(result.meta.events_failed).toBe(1);
 		expect(result.meta.events_hydrated).toBe(1);
 	});
+
+	test('counts failed fallback attempts against max fetch cap', async () => {
+		const result = await hydrateMissingInvitees(
+			[
+				{ uri: 'https://api.calendly.com/scheduled_events/evt-bad', invitees_counter: { active: 1 }, invitees: [] },
+				{ uri: 'https://api.calendly.com/scheduled_events/evt-next', invitees_counter: { active: 1 }, invitees: [] },
+			],
+			{ hydrate_invitees: true, max_invitee_fetches: 1 },
+			async (eventUuid) => {
+				if (eventUuid === 'evt-bad') throw new Error('rate_limited');
+				return { collection: [{ email: 'next@example.com' }] };
+			}
+		);
+
+		expect(result.meta.fetches_used).toBe(1);
+		expect(result.meta.events_failed).toBe(1);
+		expect(result.meta.events_skipped_due_to_cap).toBe(1);
+		expect(result.meta.truncated).toBe(true);
+		expect(result.collection[1].invitee_hydration).toEqual({
+			used: false,
+			truncated: true,
+			reason: 'max_invitee_fetches_reached',
+		});
+	});
 });
