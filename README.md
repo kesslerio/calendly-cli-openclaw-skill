@@ -62,6 +62,15 @@ This command fetches events **and** invitee details in a single API call using C
 
 Supports pagination with `--page-size` and `--max-pages` for large orgs.
 
+### Search Team Calendars by Invitee Email
+
+```bash
+./calendly search-team --email "person@example.com" --organization-uri "<YOUR_ORG_URI>" --count 25 --max-membership-pages 10
+```
+
+This command resolves team members from organization memberships, scans each member's events in bounded pages, and returns matching events with member context.
+`--max-membership-pages` defaults to `10`; if more data exists than the configured scan limits allow, output meta includes `has_more: true` and a `truncation_reason`.
+
 ### Get Event Details
 
 ```bash
@@ -83,6 +92,7 @@ Supports pagination with `--page-size` and `--max-pages` for large orgs.
 - `cancel-event` - Cancel an event
 - `list-event-invitees` - List invitees for a specific event
 - `search-invitees` - Search events by invitee email across paginated results
+- `search-team` - Search invitee email across team member calendars
 - `list-organization-memberships` - List organization memberships
 
 ### OAuth

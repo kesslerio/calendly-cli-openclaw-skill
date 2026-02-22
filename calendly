@@ -5,6 +5,7 @@ import { createRuntime, createServerProxy } from 'mcporter';
 import { createCallResult } from 'mcporter';
 import axios from 'axios';
 import { buildOrganizationMembershipParams } from './src/organization-memberships';
+import { filterInviteesByEmail, getCountPageWindow, getTeamSearchTruncationReason, normalizeTeamSearchOptions, toTeamMemberContext } from './search-team-helpers';
 
 const embeddedServer = {
   "name": "calendly",
@@ -243,6 +244,12 @@ const generatorTools = [
     "flags": "--email <email> [--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--min-start-time <min-start-time:iso-8601>] [--max-start-time <max-start-time:iso-8601>] [--page-size <page-size:number>] [--max-pages <max-pages:number>]"
   },
   {
+    "name": "search-team",
+    "description": "Search invitee email across team members by scanning organization memberships and member events",
+    "usage": "search-team --email <email> [--min-start-time <min-start-time:iso-8601>] [--max-start-time <max-start-time:iso-8601>] [--status <status:active|canceled>] [--organization-uri <organization-uri>] [--count <count:number>] [--max-membership-pages <max-membership-pages:number>]",
+    "flags": "--email <email> [--min-start-time <min-start-time:iso-8601>] [--max-start-time <max-start-time:iso-8601>] [--status <status:active|canceled>] [--organization-uri <organization-uri>] [--count <count:number>] [--max-membership-pages <max-membership-pages:number>]"
+  },
+  {
     "name": "get-event",
     "description": "Get details of a specific event",
     "usage": "get-event --event-uuid <event-uuid> [--raw <json>]",
@@ -325,6 +332,7 @@ const commandSignatures: Record<string, string> = {
   "list-events": "function list_events(user_uri?: string, organization_uri?: string, status?: \"active\" | \"canceled\", max_start_time?: string, min_start_time?: string);",
   "list-events-with-invitees": "function list_events_with_invitees(user_uri?: string, organization_uri?: string, status?: \"active\" | \"canceled\", max_start_time?: string, min_start_time?: string, count?: number);",
   "search-invitees": "function search_invitees(email: string, user_uri?: string, organization_uri?: string, status?: \"active\" | \"canceled\", min_start_time?: string, max_start_time?: string, page_size?: number, max_pages?: number);",
+  "search-team": "function search_team(email: string, min_start_time?: string, max_start_time?: string, status?: \"active\" | \"canceled\", organization_uri?: string, count?: number, max_membership_pages?: number);",
   "get-event": "function get_event(event_uuid: string);",
   "list-event-invitees": "function list_event_invitees(event_uuid: string, status?: \"active\" | \"canceled\", email?: string, count?: number);",
   "cancel-event": "function cancel_event(event_uuid: string, reason?: string);",
@@ -706,6 +714,169 @@ program
 		}
 	})
 	.addHelpText('after', () => '\nExample:\n  ' + "./calendly search-invitees --email person@example.com --organization-uri <ORG_URI>");
+
+program
+	.command("search-team")
+	.summary("search-team --email <email> [--min-start-time <min-start-time:iso-8601>] [--max-start-time <max-start-time:iso-8601>] [--status <status:active|canceled>] [--organization-uri <organization-uri>] [--count <count:number>] [--max-membership-pages <max-membership-pages:number>]")
+	.description("Search invitee email across team members by scanning organization memberships and member events")
+	.usage("--email <email> [--min-start-time <min-start-time:iso-8601>] [--max-start-time <max-start-time:iso-8601>] [--status <status:active|canceled>] [--organization-uri <organization-uri>] [--count <count:number>] [--max-membership-pages <max-membership-pages:number>] [--raw <json>]")
+	.option('--raw <json>', 'Provide raw JSON arguments to the tool, bypassing flag parsing.')
+	.option("--email <email>", "Invitee email to search for")
+	.option("--min-start-time <min-start-time:iso-8601>", "Minimum start time for events (ISO 8601 format)")
+	.option("--max-start-time <max-start-time:iso-8601>", "Maximum start time for events (ISO 8601 format)")
+	.option("--status <status:active|canceled>", "Filter events by status (choices: active, canceled; example: active)")
+	.option("--organization-uri <organization-uri>", "Optional organization URI scope")
+	.option("--count <count:number>", "Maximum number of matching events to return (default 20, max 100)", (value) => parseInt(value, 10))
+	.option("--max-membership-pages <max-membership-pages:number>", "Maximum organization membership pages to scan (default 10); results can be truncated when more pages exist", (value) => parseInt(value, 10))
+	.action(async (cmdOpts) => {
+		const globalOptions = program.opts();
+		try {
+			const apiKey = process.env.CALENDLY_API_KEY;
+			if (!apiKey) throw new Error('CALENDLY_API_KEY environment variable is required');
+
+			const rawArgs = cmdOpts.raw ? JSON.parse(cmdOpts.raw) : ({} as Record<string, unknown>);
+			const query = normalizeTeamSearchOptions(cmdOpts as Record<string, unknown>, rawArgs);
+			const timeout = globalOptions.timeout || 30000;
+			const memberships: any[] = [];
+			let membershipPageToken: string | undefined;
+			let membershipPagesScanned = 0;
+			let membershipPageLimitReached = false;
+
+			do {
+				const membershipParams = new URLSearchParams();
+				membershipParams.append('count', '100');
+				if (query.organization_uri) membershipParams.append('organization', query.organization_uri);
+				if (membershipPageToken) membershipParams.append('page_token', membershipPageToken);
+
+				const membershipResponse = await axios.get(
+					`https://api.calendly.com/organization_memberships?${membershipParams.toString()}`,
+					{
+						headers: {
+							'Authorization': `Bearer ${apiKey}`,
+							'Content-Type': 'application/json',
+						},
+						timeout,
+					}
+				);
+
+				const pageMemberships = Array.isArray(membershipResponse.data?.collection) ? membershipResponse.data.collection : [];
+				memberships.push(...pageMemberships);
+				membershipPageToken = membershipResponse.data?.pagination?.next_page_token;
+				membershipPagesScanned += 1;
+			} while (membershipPageToken && membershipPagesScanned < query.max_membership_pages);
+
+			if (Boolean(membershipPageToken) && membershipPagesScanned >= query.max_membership_pages) {
+				membershipPageLimitReached = true;
+			}
+
+			const members = memberships.filter((membership) => typeof membership?.user === 'string' && membership.user.length > 0);
+			const seenMemberUris = new Set<string>();
+			const uniqueMembers = members.filter((membership) => {
+				const userUri = String(membership.user);
+				if (seenMemberUris.has(userUri)) return false;
+				seenMemberUris.add(userUri);
+				return true;
+			});
+
+			const matches: any[] = [];
+			const { pageSize, maxPages } = getCountPageWindow(query.count);
+			let membersScanned = 0;
+			let eventPagesScanned = 0;
+			let eventsScanned = 0;
+			let reachedResultCap = false;
+			let memberEventPageLimitReached = false;
+
+			for (const membership of uniqueMembers) {
+				if (matches.length >= query.count) {
+					reachedResultCap = true;
+					break;
+				}
+				membersScanned += 1;
+				let pageToken: string | undefined;
+				let memberPages = 0;
+				let memberEventsScanned = 0;
+				const memberEventScanLimit = pageSize * maxPages;
+
+				while (memberPages < maxPages && memberEventsScanned < memberEventScanLimit) {
+					const eventParams = new URLSearchParams();
+					eventParams.append('count', pageSize.toString());
+					eventParams.append('expand', 'invitees');
+					eventParams.append('user', String(membership.user));
+					if (query.organization_uri) eventParams.append('organization', query.organization_uri);
+					if (query.status) eventParams.append('status', query.status);
+					if (query.min_start_time) eventParams.append('min_start_time', query.min_start_time);
+					if (query.max_start_time) eventParams.append('max_start_time', query.max_start_time);
+					if (pageToken) eventParams.append('page_token', pageToken);
+
+					const eventsResponse = await axios.get(
+						`https://api.calendly.com/scheduled_events?${eventParams.toString()}`,
+						{
+							headers: {
+								'Authorization': `Bearer ${apiKey}`,
+								'Content-Type': 'application/json',
+							},
+							timeout,
+						}
+					);
+
+					const events = Array.isArray(eventsResponse.data?.collection) ? eventsResponse.data.collection : [];
+					memberPages += 1;
+					eventPagesScanned += 1;
+					memberEventsScanned += events.length;
+					eventsScanned += events.length;
+
+					for (const event of events) {
+						const matchingInvitees = filterInviteesByEmail(event?.invitees, query.email);
+						if (matchingInvitees.length > 0) {
+							matches.push({
+								member: toTeamMemberContext(membership),
+								event,
+								matching_invitees: matchingInvitees,
+							});
+							if (matches.length >= query.count) {
+								reachedResultCap = true;
+								break;
+							}
+						}
+					}
+					if (reachedResultCap) break;
+
+					pageToken = eventsResponse.data?.pagination?.next_page_token;
+					if (!pageToken) break;
+				}
+
+				if (Boolean(pageToken) && memberPages >= maxPages) {
+					memberEventPageLimitReached = true;
+				}
+			}
+
+			const truncationReason = getTeamSearchTruncationReason({
+				membershipPageLimitReached,
+				memberEventPageLimitReached,
+				resultCapReached: reachedResultCap,
+			});
+
+			printResult({
+				query,
+				meta: {
+					memberships_scanned: memberships.length,
+					members_scanned: membersScanned,
+					membership_pages_scanned: membershipPagesScanned,
+					event_pages_scanned: eventPagesScanned,
+					events_scanned: eventsScanned,
+					matches: matches.length,
+					has_more: Boolean(truncationReason),
+					...(truncationReason ? { truncation_reason: truncationReason } : {}),
+				},
+				collection: matches.slice(0, query.count),
+			}, globalOptions.output ?? 'text');
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			console.error(`Error: ${message}`);
+			process.exit(1);
+		}
+	})
+	.addHelpText('after', () => '\nExample:\n  ' + "./calendly search-team --email person@example.com --organization-uri <ORG_URI> --count 25");
 
 program
 	.command("get-event")
