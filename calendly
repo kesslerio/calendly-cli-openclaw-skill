@@ -697,22 +697,40 @@ program
 	
 	.alias("list_organization_memberships")	.action(async (cmdOpts) => {
 		const globalOptions = program.opts();
-		const runtime = await ensureRuntime();
-		const serverName = embeddedName;
-		const proxy = createServerProxy(runtime, serverName, {
-			initialSchemas: embeddedSchemas,
-		});
 		try {
+			const apiKey = process.env.CALENDLY_API_KEY;
+			if (!apiKey) {
+				throw new Error('CALENDLY_API_KEY environment variable is required');
+			}
+
 			const args = cmdOpts.raw ? JSON.parse(cmdOpts.raw) : ({} as Record<string, unknown>);
-			if (cmdOpts.userUri !== undefined) args.user_uri = cmdOpts.userUri;
-		if (cmdOpts.organizationUri !== undefined) args.organization_uri = cmdOpts.organizationUri;
-		if (cmdOpts.email !== undefined) args.email = cmdOpts.email;
-		if (cmdOpts.count !== undefined) args.count = cmdOpts.count;
-			const call = (proxy.listOrganizationMemberships as any)(args);
-			const result = await invokeWithTimeout(call, globalOptions.timeout || 30000);
-			printResult(result, globalOptions.output ?? 'text');
-		} finally {
-			await runtime.close(serverName).catch(() => {});
+			const userUri = cmdOpts.userUri ?? args.user_uri;
+			const organizationUri = cmdOpts.organizationUri ?? args.organization_uri;
+			const email = cmdOpts.email ?? args.email;
+			const count = cmdOpts.count ?? args.count;
+
+			const urlParams = new URLSearchParams();
+			if (userUri) urlParams.append('user', String(userUri));
+			if (organizationUri) urlParams.append('organization', String(organizationUri));
+			if (email) urlParams.append('email', String(email));
+			if (count !== undefined) urlParams.append('count', String(count));
+
+			const response = await axios.get(
+				`https://api.calendly.com/organization_memberships?${urlParams.toString()}`,
+				{
+					headers: {
+						'Authorization': `Bearer ${apiKey}`,
+						'Content-Type': 'application/json',
+					},
+					timeout: globalOptions.timeout || 30000,
+				}
+			);
+
+			printResult(response.data, globalOptions.output ?? 'text');
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			console.error(`Error: ${message}`);
+			process.exit(1);
 		}
 	})
 	.addHelpText('after', () => '\nExample:\n  ' + "mcporter call calendly.list_organization_memberships(count: 1)");
