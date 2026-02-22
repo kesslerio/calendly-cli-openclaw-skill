@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { filterInviteesByEmail, getCountPageWindow, getTeamSearchTruncationReason, normalizeTeamSearchOptions } from "./search-team-helpers";
+import { filterInviteesByEmail, getCountPageWindow, getTeamSearchTruncationReason, normalizeTeamSearchOptions, toMembershipUserUri, toTeamMemberContext } from "./search-team-helpers";
 
 describe('normalizeTeamSearchOptions', () => {
 	test('throws when email is missing', () => {
@@ -119,5 +119,63 @@ describe('getTeamSearchTruncationReason', () => {
 			memberEventPageLimitReached: false,
 			resultCapReached: true,
 		})).toBe('result_cap');
+	});
+});
+
+describe('toMembershipUserUri', () => {
+	test('extracts URI when membership.user is a string', () => {
+		expect(toMembershipUserUri({ user: 'https://api.calendly.com/users/U1' })).toBe('https://api.calendly.com/users/U1');
+	});
+
+	test('extracts URI when membership.user is an object', () => {
+		expect(
+			toMembershipUserUri({
+				user: {
+					uri: 'https://api.calendly.com/users/U2',
+					email: 'person@example.com',
+					name: 'Person',
+				},
+			})
+		).toBe('https://api.calendly.com/users/U2');
+	});
+});
+
+describe('toTeamMemberContext', () => {
+	test('uses flattened membership fields when present', () => {
+		expect(
+			toTeamMemberContext({
+				uri: 'https://api.calendly.com/organization_memberships/M1',
+				user: 'https://api.calendly.com/users/U1',
+				user_email: 'flat@example.com',
+				user_name: 'Flat Person',
+				organization: 'https://api.calendly.com/organizations/O1',
+			})
+		).toEqual({
+			membership_uri: 'https://api.calendly.com/organization_memberships/M1',
+			user_uri: 'https://api.calendly.com/users/U1',
+			user_email: 'flat@example.com',
+			user_name: 'Flat Person',
+			organization_uri: 'https://api.calendly.com/organizations/O1',
+		});
+	});
+
+	test('falls back to nested user object when flattened fields are missing', () => {
+		expect(
+			toTeamMemberContext({
+				uri: 'https://api.calendly.com/organization_memberships/M2',
+				user: {
+					uri: 'https://api.calendly.com/users/U2',
+					email: 'nested@example.com',
+					name: 'Nested Person',
+				},
+				organization: 'https://api.calendly.com/organizations/O2',
+			})
+		).toEqual({
+			membership_uri: 'https://api.calendly.com/organization_memberships/M2',
+			user_uri: 'https://api.calendly.com/users/U2',
+			user_email: 'nested@example.com',
+			user_name: 'Nested Person',
+			organization_uri: 'https://api.calendly.com/organizations/O2',
+		});
 	});
 });
