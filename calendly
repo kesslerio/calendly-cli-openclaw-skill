@@ -604,7 +604,7 @@ program
 	.description("Search invitees by email across paginated organization events")
 	.usage("--email <email> [--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--min-start-time <min-start-time:iso-8601>] [--max-start-time <max-start-time:iso-8601>] [--page-size <page-size:number>] [--max-pages <max-pages:number>] [--raw <json>]")
 	.option('--raw <json>', 'Provide raw JSON arguments to the tool, bypassing flag parsing.')
-	.requiredOption("--email <email>", "Invitee email to search for")
+	.option("--email <email>", "Invitee email to search for")
 	.option("--user-uri <user-uri>", "Optional user URI scope")
 	.option("--organization-uri <organization-uri>", "Optional organization URI scope")
 	.option("--status <status:active|canceled>", "Filter events by status (choices: active, canceled; example: active)")
@@ -618,9 +618,22 @@ program
 			const apiKey = process.env.CALENDLY_API_KEY;
 			if (!apiKey) throw new Error('CALENDLY_API_KEY environment variable is required');
 
-			const normalizedEmail = String(cmdOpts.email).trim().toLowerCase();
-			const pageSize = Math.max(1, Math.min(100, cmdOpts.pageSize || 100));
-			const maxPages = Math.max(1, cmdOpts.maxPages || 20);
+			const args = cmdOpts.raw ? JSON.parse(cmdOpts.raw) : ({} as Record<string, unknown>);
+			const email = cmdOpts.email ?? args.email;
+			if (!email) throw new Error('email is required (use --email or --raw {"email":"..."})');
+			const userUri = cmdOpts.userUri ?? args.user_uri;
+			const organizationUri = cmdOpts.organizationUri ?? args.organization_uri;
+			const status = cmdOpts.status ?? args.status;
+			const minStartTime = cmdOpts.minStartTime ?? args.min_start_time;
+			const maxStartTime = cmdOpts.maxStartTime ?? args.max_start_time;
+			const pageSizeInput = Number(cmdOpts.pageSize ?? args.page_size ?? 100);
+			const maxPagesInput = Number(cmdOpts.maxPages ?? args.max_pages ?? 20);
+			if (!Number.isFinite(pageSizeInput) || !Number.isFinite(maxPagesInput)) {
+				throw new Error('page-size and max-pages must be valid numbers');
+			}
+			const pageSize = Math.max(1, Math.min(100, Math.trunc(pageSizeInput)));
+			const maxPages = Math.max(1, Math.trunc(maxPagesInput));
+			const normalizedEmail = String(email).trim().toLowerCase();
 			let pageToken: string | undefined;
 			let scannedPages = 0;
 			let scannedEvents = 0;
@@ -630,11 +643,11 @@ program
 				const params = new URLSearchParams();
 				params.append('count', pageSize.toString());
 				params.append('expand', 'invitees');
-				if (cmdOpts.userUri) params.append('user', cmdOpts.userUri);
-				if (cmdOpts.organizationUri) params.append('organization', cmdOpts.organizationUri);
-				if (cmdOpts.status) params.append('status', cmdOpts.status);
-				if (cmdOpts.minStartTime) params.append('min_start_time', cmdOpts.minStartTime);
-				if (cmdOpts.maxStartTime) params.append('max_start_time', cmdOpts.maxStartTime);
+				if (userUri) params.append('user', String(userUri));
+				if (organizationUri) params.append('organization', String(organizationUri));
+				if (status) params.append('status', String(status));
+				if (minStartTime) params.append('min_start_time', String(minStartTime));
+				if (maxStartTime) params.append('max_start_time', String(maxStartTime));
 				if (pageToken) params.append('page_token', pageToken);
 
 				const response = await axios.get(
@@ -666,14 +679,14 @@ program
 				if (!pageToken) break;
 			}
 
-			printResult(createCallResult({
+			printResult({
 				query: {
 					email: normalizedEmail,
-					user_uri: cmdOpts.userUri,
-					organization_uri: cmdOpts.organizationUri,
-					status: cmdOpts.status,
-					min_start_time: cmdOpts.minStartTime,
-					max_start_time: cmdOpts.maxStartTime,
+					user_uri: userUri,
+					organization_uri: organizationUri,
+					status,
+					min_start_time: minStartTime,
+					max_start_time: maxStartTime,
 					page_size: pageSize,
 					max_pages: maxPages,
 				},
@@ -684,7 +697,7 @@ program
 					has_more: scannedPages >= maxPages && Boolean(pageToken),
 				},
 				collection: matches,
-			}), globalOptions.output ?? 'text');
+			}, globalOptions.output ?? 'text');
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			console.error(`Error: ${message}`);
