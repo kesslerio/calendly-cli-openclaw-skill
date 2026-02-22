@@ -129,6 +129,7 @@ Webhook signing secret guidance:
 - Keep `CALENDLY_WEBHOOK_SIGNING_KEY` in secure runtime config (env/secret manager), never committed.
 - Use a long random value and rotate it if exposed.
 - Verify Calendly webhook signatures in your receiver with the same secret used at subscription creation.
+- If using `--scope user`, include `--user-uri "https://api.calendly.com/users/<USER_UUID>"`.
 
 ## Coming Soon: Scheduling API (v2.0)
 

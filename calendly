@@ -288,8 +288,8 @@ const generatorTools = [
   {
     "name": "create-webhook-subscription",
     "description": "Create a webhook subscription",
-    "usage": "create-webhook-subscription --url <url> --events <events> --organization-uri <organization-uri> [--scope <scope:user|organization>] [--signing-key <signing-key>]",
-    "flags": "--url <url> --events <events> --organization-uri <organization-uri> [--scope <scope:user|organization>] [--signing-key <signing-key>]"
+    "usage": "create-webhook-subscription --url <url> --events <events> --organization-uri <organization-uri> [--scope <scope:user|organization>] [--user-uri <user-uri>] [--signing-key <signing-key>]",
+    "flags": "--url <url> --events <events> --organization-uri <organization-uri> [--scope <scope:user|organization>] [--user-uri <user-uri>] [--signing-key <signing-key>]"
   },
   {
     "name": "delete-webhook-subscription",
@@ -1077,7 +1077,7 @@ program
 				}
 			);
 
-			printResult(createCallResult(response.data), globalOptions.output ?? 'text');
+			printResult(response.data, globalOptions.output ?? 'text');
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			console.error(`Error: ${message}`);
@@ -1110,7 +1110,7 @@ program
 				}
 			);
 
-			printResult(createCallResult(response.data), globalOptions.output ?? 'text');
+			printResult(response.data, globalOptions.output ?? 'text');
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			console.error(`Error: ${message}`);
@@ -1121,13 +1121,14 @@ program
 
 program
 	.command("create-webhook-subscription")
-	.summary("create-webhook-subscription --url <url> --events <events> --organization-uri <organization-uri> [--scope <scope:user|organization>] [--signing-key <signing-key>]")
+	.summary("create-webhook-subscription --url <url> --events <events> --organization-uri <organization-uri> [--scope <scope:user|organization>] [--user-uri <user-uri>] [--signing-key <signing-key>]")
 	.description("Create a webhook subscription")
-	.usage("--url <url> --events <events> --organization-uri <organization-uri> [--scope <scope:user|organization>] [--signing-key <signing-key>]")
+	.usage("--url <url> --events <events> --organization-uri <organization-uri> [--scope <scope:user|organization>] [--user-uri <user-uri>] [--signing-key <signing-key>]")
 	.requiredOption("--url <url>", "Webhook callback URL")
 	.requiredOption("--events <events>", "Comma-separated events (e.g. invitee.created,invitee.canceled)")
 	.requiredOption("--organization-uri <organization-uri>", "Organization URI")
 	.option("--scope <scope:user|organization>", "Subscription scope (choices: user, organization)", "organization")
+	.option("--user-uri <user-uri>", "User URI (required when --scope user)")
 	.option("--signing-key <signing-key>", "Signing key for signature verification")
 	.action(async (cmdOpts) => {
 		const globalOptions = program.opts();
@@ -1141,6 +1142,10 @@ program
 				scope: cmdOpts.scope,
 				organization: cmdOpts.organizationUri,
 			};
+			if (cmdOpts.scope === 'user' && !cmdOpts.userUri) {
+				throw new Error('--user-uri is required when --scope user');
+			}
+			if (cmdOpts.userUri) payload.user = cmdOpts.userUri;
 			if (cmdOpts.signingKey) payload.signing_key = cmdOpts.signingKey;
 
 			const response = await axios.post('https://api.calendly.com/webhook_subscriptions', payload, {
@@ -1151,7 +1156,7 @@ program
 				timeout: globalOptions.timeout || 30000,
 			});
 
-			printResult(createCallResult(response.data), globalOptions.output ?? 'text');
+			printResult(response.data, globalOptions.output ?? 'text');
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			console.error(`Error: ${message}`);
@@ -1173,10 +1178,10 @@ program
 			if (!apiKey) throw new Error('CALENDLY_API_KEY environment variable is required');
 			const webhookId = String(cmdOpts.webhookSubscriptionUri).split('/').pop();
 
-			await axios.delete(
-				`https://api.calendly.com/webhook_subscriptions/${encodeURIComponent(String(webhookId))}`,
-				{
-					headers: {
+				const response = await axios.delete(
+					`https://api.calendly.com/webhook_subscriptions/${encodeURIComponent(String(webhookId))}`,
+					{
+						headers: {
 						'Authorization': `Bearer ${apiKey}`,
 						'Content-Type': 'application/json',
 					},
@@ -1184,7 +1189,14 @@ program
 				}
 			);
 
-			console.log('Webhook subscription deleted successfully.');
+				printResult(
+					{
+						deleted: true,
+						webhook_subscription_uri: String(cmdOpts.webhookSubscriptionUri),
+						status: response.status,
+					},
+					globalOptions.output ?? 'text'
+				);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			console.error(`Error: ${message}`);

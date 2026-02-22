@@ -117,6 +117,7 @@ Signing secret handling guidance:
 - Treat `CALENDLY_WEBHOOK_SIGNING_KEY` as sensitive credential material and keep it out of git.
 - Inject it at runtime from your secret manager (or secure environment), not from hardcoded files.
 - Rotate the key if leaked and recreate affected subscriptions with the new key.
+- If you set `--scope user`, also pass `--user-uri "https://api.calendly.com/users/<USER_UUID>"`.
 
 ### Event Management
 

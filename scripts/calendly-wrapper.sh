@@ -206,7 +206,7 @@ EOF
         create)
             if [[ $# -ge 1 && ( "$1" == "--help" || "$1" == "-h" ) ]]; then
                 cat <<'EOF'
-Usage: webhook-subscriptions create --url URL --events EVENT1,EVENT2 --organization-uri URI [--scope user|organization] [--signing-key KEY] [--json]
+Usage: webhook-subscriptions create --url URL --events EVENT1,EVENT2 --organization-uri URI [--scope user|organization] [--user-uri URI] [--signing-key KEY] [--json]
 EOF
                 exit 0
             fi
@@ -215,6 +215,7 @@ EOF
             events=""
             organization_uri=""
             scope=""
+            user_uri=""
             signing_key=""
             json_mode=false
 
@@ -236,6 +237,10 @@ EOF
                         scope="$2"
                         shift 2
                         ;;
+                    --user-uri)
+                        user_uri="$2"
+                        shift 2
+                        ;;
                     --signing-key)
                         signing_key="$2"
                         shift 2
@@ -254,6 +259,10 @@ EOF
                 echo "ERROR: --url, --events, and --organization-uri are required" >&2
                 exit 1
             fi
+            if [[ "$scope" == "user" && -z "$user_uri" ]]; then
+                echo "ERROR: --user-uri is required when --scope user" >&2
+                exit 1
+            fi
 
             args=(
                 "create-webhook-subscription"
@@ -263,6 +272,9 @@ EOF
             )
             if [[ -n "$scope" ]]; then
                 args+=("--scope" "$scope")
+            fi
+            if [[ -n "$user_uri" ]]; then
+                args+=("--user-uri" "$user_uri")
             fi
             if [[ -n "$signing_key" ]]; then
                 args+=("--signing-key" "$signing_key")
