@@ -5,7 +5,7 @@ import { createRuntime, createServerProxy } from 'mcporter';
 import { createCallResult } from 'mcporter';
 import axios from 'axios';
 import { buildOrganizationMembershipParams } from './src/organization-memberships';
-import { filterInviteesByEmail, getCountPageWindow, getTeamSearchTruncationReason, normalizeTeamSearchOptions, toTeamMemberContext } from './search-team-helpers';
+import { filterInviteesByEmail, getCountPageWindow, getTeamSearchTruncationReason, normalizeTeamSearchOptions, toMembershipUserUri, toTeamMemberContext } from './search-team-helpers';
 import {
 	eventInviteeCount,
 	extractInviteePaginationMeta,
@@ -894,10 +894,11 @@ program
 				membershipPageLimitReached = true;
 			}
 
-			const members = memberships.filter((membership) => typeof membership?.user === 'string' && membership.user.length > 0);
+			const members = memberships.filter((membership) => Boolean(toMembershipUserUri(membership)));
 			const seenMemberUris = new Set<string>();
 			const uniqueMembers = members.filter((membership) => {
-				const userUri = String(membership.user);
+				const userUri = toMembershipUserUri(membership);
+				if (!userUri) return false;
 				if (seenMemberUris.has(userUri)) return false;
 				seenMemberUris.add(userUri);
 				return true;
@@ -917,6 +918,8 @@ program
 					break;
 				}
 				membersScanned += 1;
+				const memberUserUri = toMembershipUserUri(membership);
+				if (!memberUserUri) continue;
 				let pageToken: string | undefined;
 				let memberPages = 0;
 				let memberEventsScanned = 0;
@@ -926,7 +929,7 @@ program
 					const eventParams = new URLSearchParams();
 					eventParams.append('count', pageSize.toString());
 					eventParams.append('expand', 'invitees');
-					eventParams.append('user', String(membership.user));
+					eventParams.append('user', memberUserUri);
 					if (query.organization_uri) eventParams.append('organization', query.organization_uri);
 					if (query.status) eventParams.append('status', query.status);
 					if (query.min_start_time) eventParams.append('min_start_time', query.min_start_time);
