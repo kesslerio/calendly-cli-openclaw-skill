@@ -703,11 +703,17 @@ program
 				throw new Error('CALENDLY_API_KEY environment variable is required');
 			}
 
+			const args = cmdOpts.raw ? JSON.parse(cmdOpts.raw) : ({} as Record<string, unknown>);
+			const userUri = cmdOpts.userUri ?? args.user_uri;
+			const organizationUri = cmdOpts.organizationUri ?? args.organization_uri;
+			const email = cmdOpts.email ?? args.email;
+			const count = cmdOpts.count ?? args.count;
+
 			const urlParams = new URLSearchParams();
-			if (cmdOpts.userUri) urlParams.append('user', cmdOpts.userUri);
-			if (cmdOpts.organizationUri) urlParams.append('organization', cmdOpts.organizationUri);
-			if (cmdOpts.email) urlParams.append('email', cmdOpts.email);
-			if (cmdOpts.count) urlParams.append('count', cmdOpts.count.toString());
+			if (userUri) urlParams.append('user', String(userUri));
+			if (organizationUri) urlParams.append('organization', String(organizationUri));
+			if (email) urlParams.append('email', String(email));
+			if (count !== undefined) urlParams.append('count', String(count));
 
 			const response = await axios.get(
 				`https://api.calendly.com/organization_memberships?${urlParams.toString()}`,
@@ -720,7 +726,7 @@ program
 				}
 			);
 
-			printResult(createCallResult(response.data), globalOptions.output ?? 'text');
+			printResult(response.data, globalOptions.output ?? 'text');
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			console.error(`Error: ${message}`);
