@@ -116,10 +116,19 @@ calendly create-webhook-subscription \
 calendly list-webhook-subscriptions \
   --organization-uri "https://api.calendly.com/organizations/<ORG_UUID>"
 
+# Get webhook subscription details
+calendly get-webhook-subscription \
+  --webhook-subscription-uri "https://api.calendly.com/webhook_subscriptions/<SUBSCRIPTION_UUID>"
+
 # Delete webhook subscription
 calendly delete-webhook-subscription \
   --webhook-subscription-uri "https://api.calendly.com/webhook_subscriptions/<SUBSCRIPTION_UUID>"
 ```
+
+Webhook signing secret guidance:
+- Keep `CALENDLY_WEBHOOK_SIGNING_KEY` in secure runtime config (env/secret manager), never committed.
+- Use a long random value and rotate it if exposed.
+- Verify Calendly webhook signatures in your receiver with the same secret used at subscription creation.
 
 ## Coming Soon: Scheduling API (v2.0)
 
@@ -184,5 +193,5 @@ calendly list-events --user-uri "<URI>" --min-start-time "$(date -u +%Y-%m-%dT%H
 ---
 
 **Generated:** 2026-01-20  
-**Updated:** 2026-02-03 (Added list-events-with-invitees for single-call invitee fetching)
+**Updated:** 2026-02-22 (Webhook subscription lifecycle examples + signing key guidance)
 **Source:** meAmitPatil/calendly-mcp-server via mcporter
