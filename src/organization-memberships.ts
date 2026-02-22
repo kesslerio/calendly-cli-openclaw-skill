@@ -17,12 +17,6 @@ export function buildOrganizationMembershipParams(
   const userUri = input.user_uri ?? env.CALENDLY_USER_URI;
   const organizationUri = input.organization_uri ?? env.CALENDLY_ORGANIZATION_URI;
 
-  if (!userUri && !organizationUri) {
-    throw new Error(
-      'list-organization-memberships requires --user-uri or --organization-uri (or CALENDLY_USER_URI/CALENDLY_ORGANIZATION_URI).',
-    );
-  }
-
   const params = new URLSearchParams();
   if (userUri) params.append('user', String(userUri));
   if (organizationUri) params.append('organization', String(organizationUri));

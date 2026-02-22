@@ -30,14 +30,24 @@ describe('buildOrganizationMembershipParams', () => {
     expect(params.get('email')).toBe('person@example.com');
   });
 
-  test('throws when both user and organization are missing', () => {
-    expect(() =>
-      buildOrganizationMembershipParams(
-        { email: 'person@example.com' },
-        { CALENDLY_USER_URI: undefined, CALENDLY_ORGANIZATION_URI: undefined },
-      ),
-    ).toThrow(
-      'list-organization-memberships requires --user-uri or --organization-uri (or CALENDLY_USER_URI/CALENDLY_ORGANIZATION_URI).',
+  test('allows optional filters without user/org', () => {
+    const params = buildOrganizationMembershipParams(
+      { email: 'person@example.com', count: 10 },
+      { CALENDLY_USER_URI: undefined, CALENDLY_ORGANIZATION_URI: undefined },
     );
+
+    expect(params.get('user')).toBeNull();
+    expect(params.get('organization')).toBeNull();
+    expect(params.get('email')).toBe('person@example.com');
+    expect(params.get('count')).toBe('10');
+  });
+
+  test('returns empty params when no filters and no env fallbacks are provided', () => {
+    const params = buildOrganizationMembershipParams(
+      {},
+      { CALENDLY_USER_URI: undefined, CALENDLY_ORGANIZATION_URI: undefined },
+    );
+
+    expect(params.toString()).toBe('');
   });
 });
