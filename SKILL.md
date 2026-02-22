@@ -31,8 +31,8 @@ calendly cancel-event --event-uuid <UUID> --reason "Rescheduling needed"
 - `get-current-user` - Get authenticated user details
 
 ### Events
-- `list-events` - List scheduled events (requires --user-uri); add `--include-invitees` for one-call invitee details
-- `list-events-with-invitees` - Compatibility alias for one-call invitee details
+- `list-events` - List scheduled events (requires --user-uri); add `--include-invitees` for expand + bounded fallback invitee hydration
+- `list-events-with-invitees` - Compatibility alias for include-invitees path
 - `get-event` - Get event details (requires --event-uuid)
 - `cancel-event` - Cancel an event (requires --event-uuid, optional --reason)
 
@@ -63,9 +63,9 @@ Get your Personal Access Token from: https://calendly.com/integrations/api_webho
 
 When user asks about:
 - "What meetings do I have?" → `list-events` with `--min-start-time` (use recent date!)
-- "Show me all demos this week with who booked them" → `list-events --include-invitees` (single call!)
+- "Show me all demos this week with who booked them" → `list-events --include-invitees` (expand first; fallback hydrate only when needed)
 - "Cancel my 2pm meeting" → Find with `list-events` (time-filtered), then `cancel-event`
-- "Who's attending X meeting?" → `list-events --include-invitees` or `list-event-invitees`
+- "Who's attending X meeting?" → `list-events --include-invitees` (with fallback) or `list-event-invitees`
 
 **Note:** First time, run `calendly get-current-user` to obtain your User URI.
 
@@ -89,10 +89,11 @@ calendly list-events \
   --user-uri "<YOUR_USER_URI>" \
   -o json | jq .
 
-# List events with invitees in single API call (recommended for "who booked?")
+# List events with invitees (expand first, then fallback hydrate if needed)
 calendly list-events \
   --user-uri "<YOUR_USER_URI>" \
   --include-invitees \
+  --max-invitee-fetches 25 \
   --status active
 
 # Get event details
@@ -169,16 +170,22 @@ MCPORTER_CONFIG=./mcporter.json npx mcporter@latest generate-cli --server calend
 
 The API returns events oldest-first by default and doesn't support pagination via CLI. Without a time filter, you'll get events from years ago.
 
-For getting invitees with events, use `list-events --include-invitees` for a single API call instead of multiple calls.
+For invitees with events, use `list-events --include-invitees`. It uses `expand=invitees` first and only falls back per event when `invitees_counter.active > 0` but embedded invitees are missing.
+Control fallback cost with:
+- `--hydrate-invitees <true|false>` (default `true` for include-invitees path)
+- `--max-invitee-fetches <number>` (default `25`)
+
+When capped, output metadata includes `meta.invitee_hydration.truncated` and `truncation_reason`.
 
 ```bash
 # Last 7 days
 calendly list-events --user-uri "<URI>" --min-start-time "$(date -u -d '7 days ago' +%Y-%m-%dT00:00:00Z)"
 
-# This week with invitees (single call)
+# This week with invitees (expand first; bounded fallback)
 calendly list-events \
   --user-uri "<URI>" \
   --include-invitees \
+  --max-invitee-fetches 25 \
   --min-start-time "2026-01-20T00:00:00Z" \
   --max-start-time "2026-01-27T23:59:59Z"
 
@@ -196,5 +203,5 @@ calendly list-events --user-uri "<URI>" --min-start-time "$(date -u +%Y-%m-%dT%H
 ---
 
 **Generated:** 2026-01-20  
-**Updated:** 2026-02-22 (Webhook subscription lifecycle examples + signing key guidance)
+**Updated:** 2026-02-22 (Webhook lifecycle guidance + invitee hydration fallback controls)
 **Source:** meAmitPatil/calendly-mcp-server via mcporter
