@@ -38,6 +38,7 @@ calendly cancel-event --event-uuid <UUID> --reason "Rescheduling needed"
 
 ### Invitees
 - `list-event-invitees` - List invitees for an event (requires --event-uuid)
+- `search-invitees` - Search events by invitee email across paginated results
 
 ### Organization
 - `list-organization-memberships` - List organization memberships
