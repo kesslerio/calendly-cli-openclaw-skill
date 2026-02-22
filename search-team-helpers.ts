@@ -1,3 +1,5 @@
+import { normalizeDateRange } from './src/date-range';
+
 export type TeamSearchOptions = {
 	email: string;
 	min_start_time?: string;
@@ -46,11 +48,15 @@ export function normalizeTeamSearchOptions(cmdOpts: Record<string, unknown>, raw
 	if (statusInput !== undefined && statusInput !== 'active' && statusInput !== 'canceled') {
 		throw new Error('status must be either "active" or "canceled"');
 	}
+	const { min_start_time, max_start_time } = normalizeDateRange({
+		min_start_time: cmdOpts.minStartTime ?? rawArgs.min_start_time,
+		max_start_time: cmdOpts.maxStartTime ?? rawArgs.max_start_time,
+	});
 
 	return {
 		email: emailInput.trim().toLowerCase(),
-		min_start_time: (cmdOpts.minStartTime ?? rawArgs.min_start_time) as string | undefined,
-		max_start_time: (cmdOpts.maxStartTime ?? rawArgs.max_start_time) as string | undefined,
+		min_start_time,
+		max_start_time,
 		status: statusInput as 'active' | 'canceled' | undefined,
 		organization_uri: (cmdOpts.organizationUri ?? rawArgs.organization_uri) as string | undefined,
 		count,
