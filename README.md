@@ -49,10 +49,11 @@ Get your token from: https://calendly.com/integrations/api_webhooks
 ### List Events with Invitees (Single Call)
 
 ```bash
-./calendly list-events-with-invitees --status active
+./calendly list-events --status active --include-invitees
 ```
 
 This command fetches events **and** invitee details in a single API call using Calendly's `expand=invitees` parameter, reducing API calls from 5+ to 1.
+Backward-compatible alias still works: `./calendly list-events-with-invitees --status active`.
 
 ### Search Invitees by Email
 
@@ -122,8 +123,8 @@ Signing secret handling guidance:
 ### Event Management
 
 - `get-current-user` - Get authenticated user details
-- `list-events` - List scheduled events
-- `list-events-with-invitees` - List events with invitee details (single API call)
+- `list-events` - List scheduled events (`--include-invitees` for single-call invitee details)
+- `list-events-with-invitees` - Compatibility alias for single-call invitee details
 - `get-event` - Get event details
 - `cancel-event` - Cancel an event
 - `list-event-invitees` - List invitees for a specific event
