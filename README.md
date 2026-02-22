@@ -83,6 +83,32 @@ This command resolves team members from organization memberships, scans each mem
 ./calendly cancel-event --event-uuid "<EVENT_UUID>" --reason "Rescheduling needed"
 ```
 
+### Webhook Subscriptions
+
+```bash
+# Create
+./calendly create-webhook-subscription \
+  --url "https://example.com/calendly/webhooks" \
+  --events "invitee.created,invitee.canceled" \
+  --organization-uri "https://api.calendly.com/organizations/<ORG_UUID>" \
+  --scope organization \
+  --signing-key "$CALENDLY_WEBHOOK_SIGNING_KEY"
+
+# List
+./calendly list-webhook-subscriptions \
+  --organization-uri "https://api.calendly.com/organizations/<ORG_UUID>"
+
+# Delete
+./calendly delete-webhook-subscription \
+  --webhook-subscription-uri "https://api.calendly.com/webhook_subscriptions/<SUBSCRIPTION_UUID>"
+```
+
+Store webhook secrets in env vars and verify signatures in your receiver:
+
+```bash
+export CALENDLY_WEBHOOK_SIGNING_KEY="<long-random-secret>"
+```
+
 ### Event Management
 
 - `get-current-user` - Get authenticated user details

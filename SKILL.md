@@ -43,6 +43,12 @@ calendly cancel-event --event-uuid <UUID> --reason "Rescheduling needed"
 ### Organization
 - `list-organization-memberships` - List organization memberships
 
+### Webhooks
+- `list-webhook-subscriptions` - List webhook subscriptions
+- `get-webhook-subscription` - Get webhook subscription details
+- `create-webhook-subscription` - Create webhook subscription
+- `delete-webhook-subscription` - Delete webhook subscription
+
 ## Configuration
 
 API key can be stored in your environment or `.env` file:
@@ -97,6 +103,22 @@ calendly get-event \
 calendly cancel-event \
   --event-uuid "<EVENT_UUID>" \
   --reason "Rescheduling due to conflict"
+
+# Create webhook subscription (with signing key)
+calendly create-webhook-subscription \
+  --url "https://example.com/calendly/webhooks" \
+  --events "invitee.created,invitee.canceled" \
+  --organization-uri "https://api.calendly.com/organizations/<ORG_UUID>" \
+  --scope organization \
+  --signing-key "$CALENDLY_WEBHOOK_SIGNING_KEY"
+
+# List webhook subscriptions
+calendly list-webhook-subscriptions \
+  --organization-uri "https://api.calendly.com/organizations/<ORG_UUID>"
+
+# Delete webhook subscription
+calendly delete-webhook-subscription \
+  --webhook-subscription-uri "https://api.calendly.com/webhook_subscriptions/<SUBSCRIPTION_UUID>"
 ```
 
 ## Coming Soon: Scheduling API (v2.0)
