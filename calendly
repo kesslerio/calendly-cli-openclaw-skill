@@ -6,7 +6,14 @@ import { createCallResult } from 'mcporter';
 import axios from 'axios';
 import { buildOrganizationMembershipParams } from './src/organization-memberships';
 import { filterInviteesByEmail, getCountPageWindow, getTeamSearchTruncationReason, normalizeTeamSearchOptions, toTeamMemberContext } from './search-team-helpers';
-import { eventInviteeCount, extractInviteePaginationMeta, normalizeInvitees, shouldIncludeInvitees, toCalendlyScheduledEventsParams } from './src/list-events-invitees';
+import {
+	eventInviteeCount,
+	extractInviteePaginationMeta,
+	hydrateMissingInvitees,
+	normalizeInvitees,
+	shouldIncludeInvitees,
+	toCalendlyScheduledEventsParams,
+} from './src/list-events-invitees';
 
 const embeddedServer = {
   "name": "calendly",
@@ -229,14 +236,14 @@ const generatorTools = [
   {
     "name": "list-events",
     "description": "List scheduled events; optionally include invitee details in one API call",
-    "usage": "list-events [--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--max-start-time <max-start-time:iso-8601>] [--min-start-time <min-start-time:iso-8601>] [--include-invitees] [--expand <expand:invitees>] [--raw <json>]",
-    "flags": "[--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--max-start-time <max-start-time:iso-8601>] [--min-start-time <min-start-time:iso-8601>] [--include-invitees] [--expand <expand:invitees>] [--raw <json>]"
+    "usage": "list-events [--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--max-start-time <max-start-time:iso-8601>] [--min-start-time <min-start-time:iso-8601>] [--include-invitees] [--expand <expand:invitees>] [--hydrate-invitees <hydrate-invitees:boolean>] [--max-invitee-fetches <max-invitee-fetches:number>] [--raw <json>]",
+    "flags": "[--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--max-start-time <max-start-time:iso-8601>] [--min-start-time <min-start-time:iso-8601>] [--include-invitees] [--expand <expand:invitees>] [--hydrate-invitees <hydrate-invitees:boolean>] [--max-invitee-fetches <max-invitee-fetches:number>] [--raw <json>]"
   },
   {
     "name": "list-events-with-invitees",
     "description": "Compatibility command for listing events with invitee details in one API call",
-    "usage": "list-events-with-invitees [--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--max-start-time <max-start-time:iso-8601>] [--min-start-time <min-start-time:iso-8601>] [--count <count:number>] [--raw <json>]",
-    "flags": "[--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--max-start-time <max-start-time:iso-8601>] [--min-start-time <min-start-time:iso-8601>] [--count <count:number>] [--raw <json>]"
+    "usage": "list-events-with-invitees [--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--max-start-time <max-start-time:iso-8601>] [--min-start-time <min-start-time:iso-8601>] [--count <count:number>] [--hydrate-invitees <hydrate-invitees:boolean>] [--max-invitee-fetches <max-invitee-fetches:number>] [--raw <json>]",
+    "flags": "[--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--max-start-time <max-start-time:iso-8601>] [--min-start-time <min-start-time:iso-8601>] [--count <count:number>] [--hydrate-invitees <hydrate-invitees:boolean>] [--max-invitee-fetches <max-invitee-fetches:number>] [--raw <json>]"
   },
   {
     "name": "search-invitees",
@@ -354,8 +361,8 @@ const commandSignatures: Record<string, string> = {
   "exchange-code-for-tokens": "function exchange_code_for_tokens(code: string, redirect_uri: string);",
   "refresh-access-token": "function refresh_access_token(refresh_token: string);",
   "get-current-user": "function get_current_user();",
-  "list-events": "function list_events(user_uri?: string, organization_uri?: string, status?: \"active\" | \"canceled\", max_start_time?: string, min_start_time?: string, include_invitees?: boolean, expand?: string, count?: number);",
-  "list-events-with-invitees": "function list_events_with_invitees(user_uri?: string, organization_uri?: string, status?: \"active\" | \"canceled\", max_start_time?: string, min_start_time?: string, count?: number);",
+  "list-events": "function list_events(user_uri?: string, organization_uri?: string, status?: \"active\" | \"canceled\", max_start_time?: string, min_start_time?: string, include_invitees?: boolean, expand?: string, count?: number, hydrate_invitees?: boolean, max_invitee_fetches?: number);",
+  "list-events-with-invitees": "function list_events_with_invitees(user_uri?: string, organization_uri?: string, status?: \"active\" | \"canceled\", max_start_time?: string, min_start_time?: string, count?: number, hydrate_invitees?: boolean, max_invitee_fetches?: number);",
   "search-invitees": "function search_invitees(email: string, user_uri?: string, organization_uri?: string, status?: \"active\" | \"canceled\", min_start_time?: string, max_start_time?: string, page_size?: number, max_pages?: number);",
   "search-team": "function search_team(email: string, min_start_time?: string, max_start_time?: string, status?: \"active\" | \"canceled\", organization_uri?: string, count?: number, max_membership_pages?: number);",
   "get-event": "function get_event(event_uuid: string);",
@@ -381,7 +388,20 @@ type ListEventsCmdOptions = {
 	count?: number;
 	includeInvitees?: boolean;
 	expand?: string;
+	hydrateInvitees?: boolean;
+	maxInviteeFetches?: number;
 };
+
+function parseBooleanFlag(value: string): boolean {
+	const normalized = String(value).trim().toLowerCase();
+	if (normalized === 'true' || normalized === '1' || normalized === 'yes') {
+		return true;
+	}
+	if (normalized === 'false' || normalized === '0' || normalized === 'no') {
+		return false;
+	}
+	throw new Error(`Invalid boolean value "${value}". Use true or false.`);
+}
 
 function normalizeListEventsQuery(cmdOpts: ListEventsCmdOptions, defaults: Record<string, unknown> = {}): Record<string, unknown> {
 	const query: Record<string, unknown> = { ...defaults };
@@ -393,7 +413,34 @@ function normalizeListEventsQuery(cmdOpts: ListEventsCmdOptions, defaults: Recor
 	if (cmdOpts.count !== undefined) query.count = cmdOpts.count;
 	if (cmdOpts.includeInvitees === true) query.include_invitees = true;
 	if (cmdOpts.expand !== undefined) query.expand = cmdOpts.expand;
+	if (cmdOpts.hydrateInvitees !== undefined) query.hydrate_invitees = cmdOpts.hydrateInvitees;
+	if (cmdOpts.maxInviteeFetches !== undefined) query.max_invitee_fetches = cmdOpts.maxInviteeFetches;
 	return query;
+}
+
+async function fetchEventInviteesPage(
+	apiKey: string,
+	eventUuid: string,
+	timeout: number,
+	pageToken?: string
+): Promise<{ collection: unknown[]; next_page_token?: string }> {
+	const params = new URLSearchParams();
+	params.append('count', '100');
+	if (pageToken) params.append('page_token', pageToken);
+	const response = await axios.get(
+		`https://api.calendly.com/scheduled_events/${eventUuid}/invitees?${params.toString()}`,
+		{
+			headers: {
+				'Authorization': `Bearer ${apiKey}`,
+				'Content-Type': 'application/json',
+			},
+			timeout,
+		}
+	);
+	return {
+		collection: Array.isArray(response.data?.collection) ? response.data.collection : [],
+		next_page_token: response.data?.pagination?.next_page_token,
+	};
 }
 
 async function fetchScheduledEventsWithInvitees(query: Record<string, unknown>, timeout: number): Promise<any> {
@@ -423,9 +470,17 @@ async function fetchScheduledEventsWithInvitees(query: Record<string, unknown>, 
 	);
 
 	const events = Array.isArray(response.data?.collection) ? response.data.collection : [];
+	const hydrated = await hydrateMissingInvitees(
+		events,
+		{
+			hydrate_invitees: query.hydrate_invitees as boolean | undefined,
+			max_invitee_fetches: query.max_invitee_fetches as number | undefined,
+		},
+		(eventUuid, pageToken) => fetchEventInviteesPage(apiKey, eventUuid, timeout, pageToken)
+	);
 	return {
 		...response.data,
-		collection: events.map((event: any) => ({
+		collection: hydrated.collection.map((event: any) => ({
 			...event,
 			invitees: normalizeInvitees(event?.invitees),
 			invitee_count: eventInviteeCount(event),
@@ -433,6 +488,7 @@ async function fetchScheduledEventsWithInvitees(query: Record<string, unknown>, 
 		meta: {
 			...(response.data?.meta ?? {}),
 			...extractInviteePaginationMeta(response.data),
+			invitee_hydration: hydrated.meta,
 		},
 	};
 }
@@ -597,9 +653,9 @@ program
 
 program
 	.command("list-events")
-	.summary("list-events [--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--max-start-time <max-start-time:iso-8601>] [--min-start-time <min-start-time:iso-8601>] [--include-invitees] [--expand <expand:invitees>] [--raw <json>]")
+	.summary("list-events [--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--max-start-time <max-start-time:iso-8601>] [--min-start-time <min-start-time:iso-8601>] [--include-invitees] [--expand <expand:invitees>] [--hydrate-invitees <hydrate-invitees:boolean>] [--max-invitee-fetches <max-invitee-fetches:number>] [--raw <json>]")
 	.description("List scheduled events; use --include-invitees for invitee details in one call")
-	.usage("[--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--max-start-time <max-start-time:iso-8601>] [--min-start-time <min-start-time:iso-8601>] [--include-invitees] [--expand <expand:invitees>] [--raw <json>]")
+	.usage("[--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--max-start-time <max-start-time:iso-8601>] [--min-start-time <min-start-time:iso-8601>] [--include-invitees] [--expand <expand:invitees>] [--hydrate-invitees <hydrate-invitees:boolean>] [--max-invitee-fetches <max-invitee-fetches:number>] [--raw <json>]")
 	.option('--raw <json>', 'Provide raw JSON arguments to the tool, bypassing flag parsing.')
 
 	.option("--user-uri <user-uri>", "URI of the user whose events to list")
@@ -610,6 +666,8 @@ program
 	.option("--count <count:number>", "Number of events to return (default 20, max 100) (example: 1)", (value) => parseFloat(value))
 	.option("--include-invitees", "Include invitee details using Calendly expand=invitees in the same list-events call")
 	.option("--expand <expand:invitees>", "Compatibility expand value; currently supports invitees")
+	.option("--hydrate-invitees <hydrate-invitees:boolean>", "Hydrate missing invitees with per-event fallback calls (default true for include-invitees path)", parseBooleanFlag)
+	.option("--max-invitee-fetches <max-invitee-fetches:number>", "Safety cap for per-event invitee fallback API calls (default 25)", (value) => parseInt(value, 10))
 	
 	.alias("list_events")	.action(async (cmdOpts) => {
 		const globalOptions = program.opts();
@@ -644,9 +702,9 @@ program
 
 program
 	.command("list-events-with-invitees")
-	.summary("list-events-with-invitees [--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--max-start-time <max-start-time:iso-8601>] [--min-start-time <min-start-time:iso-8601>] [--count <count:number>]")
+	.summary("list-events-with-invitees [--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--max-start-time <max-start-time:iso-8601>] [--min-start-time <min-start-time:iso-8601>] [--count <count:number>] [--hydrate-invitees <hydrate-invitees:boolean>] [--max-invitee-fetches <max-invitee-fetches:number>]")
 	.description("Compatibility command: equivalent to list-events --include-invitees")
-	.usage("[--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--max-start-time <max-start-time:iso-8601>] [--min-start-time <min-start-time:iso-8601>] [--count <count:number>] [--raw <json>]")
+	.usage("[--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--max-start-time <max-start-time:iso-8601>] [--min-start-time <min-start-time:iso-8601>] [--count <count:number>] [--hydrate-invitees <hydrate-invitees:boolean>] [--max-invitee-fetches <max-invitee-fetches:number>] [--raw <json>]")
 	.option('--raw <json>', 'Provide raw JSON arguments to the tool, bypassing flag parsing.')
 
 	.option("--user-uri <user-uri>", "URI of the user whose events to list")
@@ -655,6 +713,8 @@ program
 	.option("--max-start-time <max-start-time:iso-8601>", "Maximum start time for events (ISO 8601 format)")
 	.option("--min-start-time <min-start-time:iso-8601>", "Minimum start time for events (ISO 8601 format)")
 	.option("--count <count:number>", "Number of events to return (default 20, max 100) (example: 1)", (value) => parseInt(value, 10))
+	.option("--hydrate-invitees <hydrate-invitees:boolean>", "Hydrate missing invitees with per-event fallback calls (default true)", parseBooleanFlag)
+	.option("--max-invitee-fetches <max-invitee-fetches:number>", "Safety cap for per-event invitee fallback API calls (default 25)", (value) => parseInt(value, 10))
 	
 	.action(async (cmdOpts) => {
 		const globalOptions = program.opts();

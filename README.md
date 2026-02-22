@@ -52,7 +52,12 @@ Get your token from: https://calendly.com/integrations/api_webhooks
 ./calendly list-events --status active --include-invitees
 ```
 
-This command fetches events **and** invitee details in a single API call using Calendly's `expand=invitees` parameter, reducing API calls from 5+ to 1.
+This command first fetches events with Calendly `expand=invitees`. When Calendly reports `invitees_counter.active > 0` but embedded `invitees` are missing/empty, CLI falls back to `scheduled_events/{event_uuid}/invitees` for those events.
+Fallback controls:
+- `--hydrate-invitees <true|false>`: enable/disable fallback (default: `true` on include-invitees path)
+- `--max-invitee-fetches <number>`: hard cap for fallback invitee fetch calls (default: `25`)
+
+Response metadata includes `meta.invitee_hydration` with fallback usage and truncation signals such as `truncated`, `events_skipped_due_to_cap`, and `truncation_reason`.
 Backward-compatible alias still works: `./calendly list-events-with-invitees --status active`.
 
 ### Search Invitees by Email
@@ -123,8 +128,8 @@ Signing secret handling guidance:
 ### Event Management
 
 - `get-current-user` - Get authenticated user details
-- `list-events` - List scheduled events (`--include-invitees` for single-call invitee details)
-- `list-events-with-invitees` - Compatibility alias for single-call invitee details
+- `list-events` - List scheduled events (`--include-invitees` for expand + bounded fallback invitee hydration)
+- `list-events-with-invitees` - Compatibility alias for include-invitees path
 - `get-event` - Get event details
 - `cancel-event` - Cancel an event
 - `list-event-invitees` - List invitees for a specific event

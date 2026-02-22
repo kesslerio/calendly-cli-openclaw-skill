@@ -1,9 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import {
+	DEFAULT_MAX_INVITEE_FETCHES,
 	eventInviteeCount,
 	extractInviteePaginationMeta,
+	hydrateMissingInvitees,
 	normalizeExpandValues,
+	normalizeMaxInviteeFetches,
 	normalizeInvitees,
+	shouldHydrateEventInvitees,
 	shouldIncludeInvitees,
 	toCalendlyScheduledEventsParams,
 } from './src/list-events-invitees';
@@ -78,6 +82,186 @@ describe('extractInviteePaginationMeta', () => {
 		expect(extractInviteePaginationMeta({})).toEqual({
 			has_more: false,
 			next_page_token: undefined,
+		});
+	});
+});
+
+describe('shouldHydrateEventInvitees', () => {
+	test('hydrates only when active counter is positive and embedded invitees are missing', () => {
+		expect(shouldHydrateEventInvitees({ invitees_counter: { active: 1 }, invitees: [] })).toBe(true);
+		expect(shouldHydrateEventInvitees({ invitees_counter: { active: 2 }, invitees: undefined })).toBe(true);
+		expect(shouldHydrateEventInvitees({ invitees_counter: { active: 0 }, invitees: [] })).toBe(false);
+		expect(shouldHydrateEventInvitees({
+			invitees_counter: { active: 2 },
+			invitees: [{ email: 'embedded@example.com' }],
+		})).toBe(false);
+	});
+});
+
+describe('normalizeMaxInviteeFetches', () => {
+	test('defaults and sanitizes invalid values', () => {
+		expect(normalizeMaxInviteeFetches(undefined)).toBe(DEFAULT_MAX_INVITEE_FETCHES);
+		expect(normalizeMaxInviteeFetches(0)).toBe(DEFAULT_MAX_INVITEE_FETCHES);
+		expect(normalizeMaxInviteeFetches(-2)).toBe(DEFAULT_MAX_INVITEE_FETCHES);
+		expect(normalizeMaxInviteeFetches('3')).toBe(3);
+	});
+});
+
+describe('hydrateMissingInvitees', () => {
+	test('hydrates missing invitees using paginated fetches', async () => {
+		const pages = new Map<string, Array<{ collection: unknown[]; next_page_token?: string }>>([
+			['evt-1', [
+				{ collection: [{ email: 'one@example.com' }], next_page_token: 'p2' },
+				{ collection: [{ email: 'two@example.com' }] },
+			]],
+		]);
+		const calls: Array<{ eventUuid: string; pageToken?: string }> = [];
+
+		const result = await hydrateMissingInvitees(
+			[{ uri: 'https://api.calendly.com/scheduled_events/evt-1', invitees_counter: { active: 2 }, invitees: [] }],
+			{ hydrate_invitees: true, max_invitee_fetches: 10 },
+			async (eventUuid, pageToken) => {
+				calls.push({ eventUuid, pageToken });
+				const queue = pages.get(eventUuid) ?? [];
+				const page = queue.shift() ?? { collection: [] };
+				pages.set(eventUuid, queue);
+				return page;
+			}
+		);
+
+		expect(calls).toEqual([
+			{ eventUuid: 'evt-1', pageToken: undefined },
+			{ eventUuid: 'evt-1', pageToken: 'p2' },
+		]);
+		expect(result.collection[0].invitees).toEqual([
+			{ email: 'one@example.com' },
+			{ email: 'two@example.com' },
+		]);
+		expect(result.collection[0].invitee_hydration).toEqual({ used: true, truncated: false });
+		expect(result.meta.fetches_used).toBe(2);
+		expect(result.meta.truncated).toBe(false);
+	});
+
+	test('stops hydration when max invitee fetch cap is reached', async () => {
+		const result = await hydrateMissingInvitees(
+			[
+				{ uri: 'https://api.calendly.com/scheduled_events/evt-1', invitees_counter: { active: 2 }, invitees: [] },
+				{ uri: 'https://api.calendly.com/scheduled_events/evt-2', invitees_counter: { active: 1 }, invitees: [] },
+			],
+			{ hydrate_invitees: true, max_invitee_fetches: 1 },
+			async (eventUuid) => ({
+				collection: [{ email: `${eventUuid}@example.com` }],
+			})
+		);
+
+		expect(result.collection[0].invitees).toEqual([{ email: 'evt-1@example.com' }]);
+		expect(result.collection[1].invitees).toEqual([]);
+		expect(result.collection[1].invitee_hydration).toEqual({
+			used: false,
+			truncated: true,
+			reason: 'max_invitee_fetches_reached',
+		});
+		expect(result.meta.fetches_used).toBe(1);
+		expect(result.meta.events_skipped_due_to_cap).toBe(1);
+		expect(result.meta.truncated).toBe(true);
+		expect(result.meta.truncation_reason).toBe('max_invitee_fetches_reached');
+	});
+
+	test('marks truncation without counting event as skipped when cap is reached mid-pagination', async () => {
+		let calls = 0;
+		const result = await hydrateMissingInvitees(
+			[{ uri: 'https://api.calendly.com/scheduled_events/evt-1', invitees_counter: { active: 3 }, invitees: [] }],
+			{ hydrate_invitees: true, max_invitee_fetches: 1 },
+			async () => {
+				calls += 1;
+				return {
+					collection: [{ email: 'first@example.com' }],
+					next_page_token: 'next',
+				};
+			}
+		);
+
+		expect(calls).toBe(1);
+		expect(result.collection[0].invitees).toEqual([{ email: 'first@example.com' }]);
+		expect(result.collection[0].invitee_hydration).toEqual({
+			used: true,
+			truncated: true,
+			reason: 'max_invitee_fetches_reached',
+		});
+		expect(result.meta.events_skipped_due_to_cap).toBe(0);
+		expect(result.meta.truncated).toBe(true);
+	});
+
+	test('does not fallback fetch when invitees are already embedded', async () => {
+		let fetchCalls = 0;
+		const result = await hydrateMissingInvitees(
+			[{
+				uri: 'https://api.calendly.com/scheduled_events/evt-1',
+				invitees_counter: { active: 2 },
+				invitees: [{ email: 'embedded@example.com' }],
+			}],
+			{ hydrate_invitees: true, max_invitee_fetches: 5 },
+			async () => {
+				fetchCalls += 1;
+				return { collection: [] };
+			}
+		);
+
+		expect(fetchCalls).toBe(0);
+		expect(result.collection[0].invitees).toEqual([{ email: 'embedded@example.com' }]);
+		expect(result.collection[0].invitee_hydration).toEqual({ used: false, truncated: false });
+		expect(result.meta.used).toBe(false);
+		expect(result.meta.events_needing_hydration).toBe(0);
+	});
+
+	test('isolates per-event hydration failures without failing all events', async () => {
+		const result = await hydrateMissingInvitees(
+			[
+				{ uri: 'https://api.calendly.com/scheduled_events/evt-bad', invitees_counter: { active: 1 }, invitees: [] },
+				{ uri: 'https://api.calendly.com/scheduled_events/evt-good', invitees_counter: { active: 1 }, invitees: [] },
+			],
+			{ hydrate_invitees: true, max_invitee_fetches: 10 },
+			async (eventUuid) => {
+				if (eventUuid === 'evt-bad') {
+					throw new Error('timeout');
+				}
+				return { collection: [{ email: 'good@example.com' }] };
+			}
+		);
+
+		expect(result.collection[0].invitee_hydration).toEqual({
+			used: true,
+			truncated: false,
+			reason: 'invitee_fetch_failed',
+			error: 'timeout',
+		});
+		expect(result.collection[0].invitees).toEqual([]);
+		expect(result.collection[1].invitees).toEqual([{ email: 'good@example.com' }]);
+		expect(result.meta.events_failed).toBe(1);
+		expect(result.meta.events_hydrated).toBe(1);
+	});
+
+	test('counts failed fallback attempts against max fetch cap', async () => {
+		const result = await hydrateMissingInvitees(
+			[
+				{ uri: 'https://api.calendly.com/scheduled_events/evt-bad', invitees_counter: { active: 1 }, invitees: [] },
+				{ uri: 'https://api.calendly.com/scheduled_events/evt-next', invitees_counter: { active: 1 }, invitees: [] },
+			],
+			{ hydrate_invitees: true, max_invitee_fetches: 1 },
+			async (eventUuid) => {
+				if (eventUuid === 'evt-bad') throw new Error('rate_limited');
+				return { collection: [{ email: 'next@example.com' }] };
+			}
+		);
+
+		expect(result.meta.fetches_used).toBe(1);
+		expect(result.meta.events_failed).toBe(1);
+		expect(result.meta.events_skipped_due_to_cap).toBe(1);
+		expect(result.meta.truncated).toBe(true);
+		expect(result.collection[1].invitee_hydration).toEqual({
+			used: false,
+			truncated: true,
+			reason: 'max_invitee_fetches_reached',
 		});
 	});
 });
