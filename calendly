@@ -4,6 +4,7 @@ import { Command } from 'commander';
 import { createRuntime, createServerProxy } from 'mcporter';
 import { createCallResult } from 'mcporter';
 import axios from 'axios';
+import { buildOrganizationMembershipParams } from './src/organization-memberships';
 
 const embeddedServer = {
   "name": "calendly",
@@ -824,11 +825,12 @@ program
 			const email = cmdOpts.email ?? args.email;
 			const count = cmdOpts.count ?? args.count;
 
-			const urlParams = new URLSearchParams();
-			if (userUri) urlParams.append('user', String(userUri));
-			if (organizationUri) urlParams.append('organization', String(organizationUri));
-			if (email) urlParams.append('email', String(email));
-			if (count !== undefined) urlParams.append('count', String(count));
+			const urlParams = buildOrganizationMembershipParams({
+				user_uri: userUri as string | undefined,
+				organization_uri: organizationUri as string | undefined,
+				email: email as string | undefined,
+				count: count as number | string | undefined,
+			});
 
 			const response = await axios.get(
 				`https://api.calendly.com/organization_memberships?${urlParams.toString()}`,
