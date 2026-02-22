@@ -6,6 +6,7 @@ import { createCallResult } from 'mcporter';
 import axios from 'axios';
 import { buildOrganizationMembershipParams } from './src/organization-memberships';
 import { filterInviteesByEmail, getCountPageWindow, getTeamSearchTruncationReason, normalizeTeamSearchOptions, toTeamMemberContext } from './search-team-helpers';
+import { eventInviteeCount, extractInviteePaginationMeta, normalizeInvitees, shouldIncludeInvitees, toCalendlyScheduledEventsParams } from './src/list-events-invitees';
 
 const embeddedServer = {
   "name": "calendly",
@@ -227,15 +228,15 @@ const generatorTools = [
   },
   {
     "name": "list-events",
-    "description": "List scheduled events for the authenticated user",
-    "usage": "list-events [--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--max-start-time <max-start-time:iso-8601>] [--min-start-time <min-start-time:iso-8601>] [--raw <json>]",
-    "flags": "[--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--max-start-time <max-start-time:iso-8601>] [--min-start-time <min-start-time:iso-8601>] [--raw <json>]"
+    "description": "List scheduled events; optionally include invitee details in one API call",
+    "usage": "list-events [--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--max-start-time <max-start-time:iso-8601>] [--min-start-time <min-start-time:iso-8601>] [--include-invitees] [--expand <expand:invitees>] [--raw <json>]",
+    "flags": "[--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--max-start-time <max-start-time:iso-8601>] [--min-start-time <min-start-time:iso-8601>] [--include-invitees] [--expand <expand:invitees>] [--raw <json>]"
   },
   {
     "name": "list-events-with-invitees",
-    "description": "List scheduled events with invitee details in a single API call using Calendly's expand=invitees parameter",
-    "usage": "list-events-with-invitees [--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--max-start-time <max-start-time:iso-8601>] [--min-start-time <min-start-time:iso-8601>] [--count <count:number>]",
-    "flags": "[--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--max-start-time <max-start-time:iso-8601>] [--min-start-time <min-start-time:iso-8601>] [--count <count:number>]"
+    "description": "Compatibility command for listing events with invitee details in one API call",
+    "usage": "list-events-with-invitees [--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--max-start-time <max-start-time:iso-8601>] [--min-start-time <min-start-time:iso-8601>] [--count <count:number>] [--raw <json>]",
+    "flags": "[--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--max-start-time <max-start-time:iso-8601>] [--min-start-time <min-start-time:iso-8601>] [--count <count:number>] [--raw <json>]"
   },
   {
     "name": "search-invitees",
@@ -353,7 +354,7 @@ const commandSignatures: Record<string, string> = {
   "exchange-code-for-tokens": "function exchange_code_for_tokens(code: string, redirect_uri: string);",
   "refresh-access-token": "function refresh_access_token(refresh_token: string);",
   "get-current-user": "function get_current_user();",
-  "list-events": "function list_events(user_uri?: string, organization_uri?: string, status?: \"active\" | \"canceled\", max_start_time?: string, min_start_time?: string);",
+  "list-events": "function list_events(user_uri?: string, organization_uri?: string, status?: \"active\" | \"canceled\", max_start_time?: string, min_start_time?: string, include_invitees?: boolean, expand?: string, count?: number);",
   "list-events-with-invitees": "function list_events_with_invitees(user_uri?: string, organization_uri?: string, status?: \"active\" | \"canceled\", max_start_time?: string, min_start_time?: string, count?: number);",
   "search-invitees": "function search_invitees(email: string, user_uri?: string, organization_uri?: string, status?: \"active\" | \"canceled\", min_start_time?: string, max_start_time?: string, page_size?: number, max_pages?: number);",
   "search-team": "function search_team(email: string, min_start_time?: string, max_start_time?: string, status?: \"active\" | \"canceled\", organization_uri?: string, count?: number, max_membership_pages?: number);",
@@ -369,6 +370,115 @@ program.configureHelp({
 	},
 });
 program.showSuggestionAfterError(true);
+
+type ListEventsCmdOptions = {
+	raw?: string;
+	userUri?: string;
+	organizationUri?: string;
+	status?: 'active' | 'canceled';
+	maxStartTime?: string;
+	minStartTime?: string;
+	count?: number;
+	includeInvitees?: boolean;
+	expand?: string;
+};
+
+function normalizeListEventsQuery(cmdOpts: ListEventsCmdOptions, defaults: Record<string, unknown> = {}): Record<string, unknown> {
+	const query: Record<string, unknown> = { ...defaults };
+	if (cmdOpts.userUri !== undefined) query.user_uri = cmdOpts.userUri;
+	if (cmdOpts.organizationUri !== undefined) query.organization_uri = cmdOpts.organizationUri;
+	if (cmdOpts.status !== undefined) query.status = cmdOpts.status;
+	if (cmdOpts.maxStartTime !== undefined) query.max_start_time = cmdOpts.maxStartTime;
+	if (cmdOpts.minStartTime !== undefined) query.min_start_time = cmdOpts.minStartTime;
+	if (cmdOpts.count !== undefined) query.count = cmdOpts.count;
+	if (cmdOpts.includeInvitees === true) query.include_invitees = true;
+	if (cmdOpts.expand !== undefined) query.expand = cmdOpts.expand;
+	return query;
+}
+
+async function fetchScheduledEventsWithInvitees(query: Record<string, unknown>, timeout: number): Promise<any> {
+	const apiKey = process.env.CALENDLY_API_KEY;
+	if (!apiKey) throw new Error('CALENDLY_API_KEY environment variable is required');
+
+	const params = toCalendlyScheduledEventsParams({
+		user_uri: query.user_uri as string | undefined,
+		organization_uri: query.organization_uri as string | undefined,
+		status: query.status as string | undefined,
+		max_start_time: query.max_start_time as string | undefined,
+		min_start_time: query.min_start_time as string | undefined,
+		count: query.count as number | undefined,
+		expand: query.expand as string | string[] | undefined,
+		include_invitees: query.include_invitees as boolean | undefined,
+	});
+
+	const response = await axios.get(
+		`https://api.calendly.com/scheduled_events?${params.toString()}`,
+		{
+			headers: {
+				'Authorization': `Bearer ${apiKey}`,
+				'Content-Type': 'application/json',
+			},
+			timeout,
+		}
+	);
+
+	const events = Array.isArray(response.data?.collection) ? response.data.collection : [];
+	return {
+		...response.data,
+		collection: events.map((event: any) => ({
+			...event,
+			invitees: normalizeInvitees(event?.invitees),
+			invitee_count: eventInviteeCount(event),
+		})),
+		meta: {
+			...(response.data?.meta ?? {}),
+			...extractInviteePaginationMeta(response.data),
+		},
+	};
+}
+
+function printEventsWithInviteesResult(resultData: any, format: string): void {
+	const events = Array.isArray(resultData?.collection) ? resultData.collection : [];
+	if (format === 'json' || format === 'raw') {
+		console.log(JSON.stringify(resultData, null, 2));
+		return;
+	}
+	if (format === 'markdown') {
+		if (events.length === 0) {
+			console.log('No events found.');
+			return;
+		}
+		console.log('## Events with Invitees\n');
+		console.log('| Event | Start Time | Status | Invitees |');
+		console.log('|-------|------------|--------|----------|');
+		for (const event of events) {
+			const inviteeNames = normalizeInvitees(event.invitees).map((i: any) => i.name || i.email).join(', ') || 'None';
+			console.log(`| ${event.name} | ${event.start_time} | ${event.status} | ${event.invitee_count || 0} (${inviteeNames}) |`);
+		}
+		return;
+	}
+
+	if (events.length === 0) {
+		console.log('No events found.');
+		return;
+	}
+	console.log('Events with Invitees:\n');
+	for (const event of events) {
+		console.log(`Event: ${event.name}`);
+		console.log(`  Start: ${event.start_time}`);
+		console.log(`  Status: ${event.status}`);
+		console.log('  Invitees:');
+		const invitees = normalizeInvitees(event.invitees);
+		if (invitees.length === 0) {
+			console.log('    (none)');
+		} else {
+			for (const invitee of invitees) {
+				console.log(`    - ${invitee.name || invitee.email} (${invitee.email})`);
+			}
+		}
+		console.log('');
+	}
+}
 
 program
 	.command("get-oauth-url")
@@ -487,9 +597,9 @@ program
 
 program
 	.command("list-events")
-	.summary("list-events [--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--max-start-time <max-start-time:iso-8601>] [--min-start-time <min-start-time:iso-8601>] [--raw <json>]")
-	.description("List scheduled events for the authenticated user")
-	.usage("[--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--max-start-time <max-start-time:iso-8601>] [--min-start-time <min-start-time:iso-8601>] [--raw <json>]")
+	.summary("list-events [--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--max-start-time <max-start-time:iso-8601>] [--min-start-time <min-start-time:iso-8601>] [--include-invitees] [--expand <expand:invitees>] [--raw <json>]")
+	.description("List scheduled events; use --include-invitees for invitee details in one call")
+	.usage("[--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--max-start-time <max-start-time:iso-8601>] [--min-start-time <min-start-time:iso-8601>] [--include-invitees] [--expand <expand:invitees>] [--raw <json>]")
 	.option('--raw <json>', 'Provide raw JSON arguments to the tool, bypassing flag parsing.')
 
 	.option("--user-uri <user-uri>", "URI of the user whose events to list")
@@ -498,22 +608,30 @@ program
 	.option("--max-start-time <max-start-time:iso-8601>", "Maximum start time for events (ISO 8601 format)")
 	.option("--min-start-time <min-start-time:iso-8601>", "Minimum start time for events (ISO 8601 format)")
 	.option("--count <count:number>", "Number of events to return (default 20, max 100) (example: 1)", (value) => parseFloat(value))
+	.option("--include-invitees", "Include invitee details using Calendly expand=invitees in the same list-events call")
+	.option("--expand <expand:invitees>", "Compatibility expand value; currently supports invitees")
 	
 	.alias("list_events")	.action(async (cmdOpts) => {
 		const globalOptions = program.opts();
+		const args = normalizeListEventsQuery(cmdOpts, cmdOpts.raw ? JSON.parse(cmdOpts.raw) : {});
+		if (shouldIncludeInvitees(args)) {
+			try {
+				const resultData = await fetchScheduledEventsWithInvitees(args, globalOptions.timeout || 30000);
+				printEventsWithInviteesResult(resultData, globalOptions.output ?? 'text');
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				console.error(`Error: ${message}`);
+				process.exit(1);
+			}
+			return;
+		}
+
 		const runtime = await ensureRuntime();
 		const serverName = embeddedName;
 		const proxy = createServerProxy(runtime, serverName, {
 			initialSchemas: embeddedSchemas,
 		});
 		try {
-			const args = cmdOpts.raw ? JSON.parse(cmdOpts.raw) : ({} as Record<string, unknown>);
-			if (cmdOpts.userUri !== undefined) args.user_uri = cmdOpts.userUri;
-		if (cmdOpts.organizationUri !== undefined) args.organization_uri = cmdOpts.organizationUri;
-		if (cmdOpts.status !== undefined) args.status = cmdOpts.status;
-		if (cmdOpts.maxStartTime !== undefined) args.max_start_time = cmdOpts.maxStartTime;
-		if (cmdOpts.minStartTime !== undefined) args.min_start_time = cmdOpts.minStartTime;
-		if (cmdOpts.count !== undefined) args.count = cmdOpts.count;
 			const call = (proxy.listEvents as any)(args);
 			const result = await invokeWithTimeout(call, globalOptions.timeout || 30000);
 			printResult(result, globalOptions.output ?? 'text');
@@ -521,13 +639,13 @@ program
 			await runtime.close(serverName).catch(() => {});
 		}
 	})
-	.addHelpText('after', () => '\nExample:\n  ' + "mcporter call calendly.list_events(status: \"active\")")
+	.addHelpText('after', () => '\nExample:\n  ' + "./calendly list-events --status active --include-invitees")
 	.addHelpText('afterAll', () => '\n' + "// optional (1): count" + '\n');
 
 program
 	.command("list-events-with-invitees")
 	.summary("list-events-with-invitees [--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--max-start-time <max-start-time:iso-8601>] [--min-start-time <min-start-time:iso-8601>] [--count <count:number>]")
-	.description("List scheduled events with invitee details in a single API call using Calendly's expand=invitees parameter")
+	.description("Compatibility command: equivalent to list-events --include-invitees")
 	.usage("[--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--max-start-time <max-start-time:iso-8601>] [--min-start-time <min-start-time:iso-8601>] [--count <count:number>] [--raw <json>]")
 	.option('--raw <json>', 'Provide raw JSON arguments to the tool, bypassing flag parsing.')
 
@@ -541,95 +659,18 @@ program
 	.action(async (cmdOpts) => {
 		const globalOptions = program.opts();
 		try {
-			// Get API key from environment
-			const apiKey = process.env.CALENDLY_API_KEY;
-			if (!apiKey) {
-				throw new Error('CALENDLY_API_KEY environment variable is required');
-			}
-			
-			// Build URL with parameters
-			const urlParams = new URLSearchParams();
-			urlParams.append('expand', 'invitees');
-			
-			if (cmdOpts.userUri) {
-				urlParams.append('user', cmdOpts.userUri);
-			}
-			if (cmdOpts.organizationUri) {
-				urlParams.append('organization', cmdOpts.organizationUri);
-			}
-			if (cmdOpts.status) {
-				urlParams.append('status', cmdOpts.status);
-			}
-			if (cmdOpts.maxStartTime) {
-				urlParams.append('max_start_time', cmdOpts.maxStartTime);
-			}
-			if (cmdOpts.minStartTime) {
-				urlParams.append('min_start_time', cmdOpts.minStartTime);
-			}
-			if (cmdOpts.count) {
-				urlParams.append('count', cmdOpts.count.toString());
-			}
-			
-			const response = await axios.get(
-				`https://api.calendly.com/scheduled_events?${urlParams.toString()}`,
-				{
-					headers: {
-						'Authorization': `Bearer ${apiKey}`,
-						'Content-Type': 'application/json',
-					},
-					timeout: 30000,
-				}
-			);
-			
-			// Format output similar to other commands
-			const outputFormat = globalOptions.output ?? 'text';
-			if (outputFormat === 'json' || outputFormat === 'raw') {
-				console.log(JSON.stringify(response.data, null, 2));
-			} else if (outputFormat === 'markdown') {
-				// Format as markdown table
-				const events = response.data.collection || [];
-				if (events.length === 0) {
-					console.log('No events found.');
-					return;
-				}
-				console.log('## Events with Invitees\n');
-				console.log('| Event | Start Time | Status | Invitees |');
-				console.log('|-------|------------|--------|----------|');
-				for (const event of events) {
-					const inviteeCount = event.invitees?.length || 0;
-					const inviteeNames = event.invitees?.map((i: any) => i.name || i.email).join(', ') || 'None';
-					console.log(`| ${event.name} | ${event.start_time} | ${event.status} | ${inviteeCount} (${inviteeNames}) |`);
-				}
-			} else {
-				// Default text format
-				const events = response.data.collection || [];
-				if (events.length === 0) {
-					console.log('No events found.');
-					return;
-				}
-				console.log('Events with Invitees:\n');
-				for (const event of events) {
-					console.log(`Event: ${event.name}`);
-					console.log(`  Start: ${event.start_time}`);
-					console.log(`  Status: ${event.status}`);
-					console.log(`  Invitees:`);
-					if (event.invitees && event.invitees.length > 0) {
-						for (const invitee of event.invitees) {
-							console.log(`    - ${invitee.name || invitee.email} (${invitee.email})`);
-						}
-					} else {
-						console.log('    (none)');
-					}
-					console.log('');
-				}
-			}
+			const args = normalizeListEventsQuery(cmdOpts, cmdOpts.raw ? JSON.parse(cmdOpts.raw) : {});
+			args.include_invitees = true;
+			args.expand = 'invitees';
+			const resultData = await fetchScheduledEventsWithInvitees(args, globalOptions.timeout || 30000);
+			printEventsWithInviteesResult(resultData, globalOptions.output ?? 'text');
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			console.error(`Error: ${message}`);
 			process.exit(1);
 		}
 	})
-	.addHelpText('after', () => '\nExample:\n  ' + "./calendly list-events-with-invitees --status active");
+	.addHelpText('after', () => '\nExample:\n  ' + "./calendly list-events --status active --include-invitees");
 
 program
 	.command("search-invitees")
