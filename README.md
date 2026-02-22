@@ -54,6 +54,14 @@ Get your token from: https://calendly.com/integrations/api_webhooks
 
 This command fetches events **and** invitee details in a single API call using Calendly's `expand=invitees` parameter, reducing API calls from 5+ to 1.
 
+### Search Invitees by Email
+
+```bash
+./calendly search-invitees --email "person@example.com" --organization-uri "<YOUR_ORG_URI>"
+```
+
+Supports pagination with `--page-size` and `--max-pages` for large orgs.
+
 ### Get Event Details
 
 ```bash
@@ -74,6 +82,7 @@ This command fetches events **and** invitee details in a single API call using C
 - `get-event` - Get event details
 - `cancel-event` - Cancel an event
 - `list-event-invitees` - List invitees for a specific event
+- `search-invitees` - Search events by invitee email across paginated results
 - `list-organization-memberships` - List organization memberships
 
 ### OAuth
