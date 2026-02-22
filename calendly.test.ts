@@ -54,6 +54,29 @@ describe('normalizeTeamSearchOptions', () => {
 		)).toThrow('max_membership_pages must be a valid number');
 	});
 
+	test('rejects invalid ISO-8601 date bounds', () => {
+		expect(() => normalizeTeamSearchOptions(
+			{ email: 'person@example.com', minStartTime: '2026-01-01' },
+			{}
+		)).toThrow('min_start_time must be a valid ISO-8601 timestamp');
+
+		expect(() => normalizeTeamSearchOptions(
+			{ email: 'person@example.com', maxStartTime: 'invalid-date' },
+			{}
+		)).toThrow('max_start_time must be a valid ISO-8601 timestamp');
+	});
+
+	test('rejects min_start_time greater than max_start_time', () => {
+		expect(() => normalizeTeamSearchOptions(
+			{
+				email: 'person@example.com',
+				minStartTime: '2026-01-03T00:00:00Z',
+				maxStartTime: '2026-01-01T00:00:00Z',
+			},
+			{}
+		)).toThrow('min_start_time must be less than or equal to max_start_time');
+	});
+
 	test('clamps max membership pages to at least one', () => {
 		const options = normalizeTeamSearchOptions(
 			{ email: 'person@example.com', maxMembershipPages: 0 },

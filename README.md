@@ -43,7 +43,10 @@ Get your token from: https://calendly.com/integrations/api_webhooks
 ### List Events
 
 ```bash
-./calendly list-events --user-uri "<YOUR_USER_URI>"
+./calendly list-events \
+  --user-uri "<YOUR_USER_URI>" \
+  --min-start-time "2026-01-20T00:00:00Z" \
+  --max-start-time "2026-01-27T23:59:59Z"
 ```
 
 ### List Events with Invitees (Single Call)
@@ -59,6 +62,11 @@ Fallback controls:
 
 Response metadata includes `meta.invitee_hydration` with fallback usage and truncation signals such as `truncated`, `events_skipped_due_to_cap`, and `truncation_reason`.
 Backward-compatible alias still works: `./calendly list-events-with-invitees --status active`.
+
+Date-range validation rules for `list-events`, `list-events-with-invitees`, `search-invitees`, and `search-team`:
+- `--min-start-time` and `--max-start-time` must be ISO-8601 timestamps (example: `2026-01-20T00:00:00Z`)
+- when both are set, `min-start-time` must be less than or equal to `max-start-time`
+- validation is identical for normal flags and `--raw` JSON input
 
 ### Search Invitees by Email
 

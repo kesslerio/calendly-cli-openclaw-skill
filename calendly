@@ -6,6 +6,8 @@ import { createCallResult } from 'mcporter';
 import axios from 'axios';
 import { buildOrganizationMembershipParams } from './src/organization-memberships';
 import { filterInviteesByEmail, getCountPageWindow, getTeamSearchTruncationReason, normalizeTeamSearchOptions, toMembershipUserUri, toTeamMemberContext } from './search-team-helpers';
+import { normalizeDateRange } from './src/date-range';
+import { normalizeListEventsQuery } from './src/list-events-query';
 import {
 	eventInviteeCount,
 	extractInviteePaginationMeta,
@@ -378,20 +380,6 @@ program.configureHelp({
 });
 program.showSuggestionAfterError(true);
 
-type ListEventsCmdOptions = {
-	raw?: string;
-	userUri?: string;
-	organizationUri?: string;
-	status?: 'active' | 'canceled';
-	maxStartTime?: string;
-	minStartTime?: string;
-	count?: number;
-	includeInvitees?: boolean;
-	expand?: string;
-	hydrateInvitees?: boolean;
-	maxInviteeFetches?: number;
-};
-
 function parseBooleanFlag(value: string): boolean {
 	const normalized = String(value).trim().toLowerCase();
 	if (normalized === 'true' || normalized === '1' || normalized === 'yes') {
@@ -401,21 +389,6 @@ function parseBooleanFlag(value: string): boolean {
 		return false;
 	}
 	throw new Error(`Invalid boolean value "${value}". Use true or false.`);
-}
-
-function normalizeListEventsQuery(cmdOpts: ListEventsCmdOptions, defaults: Record<string, unknown> = {}): Record<string, unknown> {
-	const query: Record<string, unknown> = { ...defaults };
-	if (cmdOpts.userUri !== undefined) query.user_uri = cmdOpts.userUri;
-	if (cmdOpts.organizationUri !== undefined) query.organization_uri = cmdOpts.organizationUri;
-	if (cmdOpts.status !== undefined) query.status = cmdOpts.status;
-	if (cmdOpts.maxStartTime !== undefined) query.max_start_time = cmdOpts.maxStartTime;
-	if (cmdOpts.minStartTime !== undefined) query.min_start_time = cmdOpts.minStartTime;
-	if (cmdOpts.count !== undefined) query.count = cmdOpts.count;
-	if (cmdOpts.includeInvitees === true) query.include_invitees = true;
-	if (cmdOpts.expand !== undefined) query.expand = cmdOpts.expand;
-	if (cmdOpts.hydrateInvitees !== undefined) query.hydrate_invitees = cmdOpts.hydrateInvitees;
-	if (cmdOpts.maxInviteeFetches !== undefined) query.max_invitee_fetches = cmdOpts.maxInviteeFetches;
-	return query;
 }
 
 async function fetchEventInviteesPage(
@@ -749,17 +722,18 @@ program
 	.action(async (cmdOpts) => {
 		const globalOptions = program.opts();
 		try {
-			const apiKey = process.env.CALENDLY_API_KEY;
-			if (!apiKey) throw new Error('CALENDLY_API_KEY environment variable is required');
-
 			const args = cmdOpts.raw ? JSON.parse(cmdOpts.raw) : ({} as Record<string, unknown>);
 			const email = cmdOpts.email ?? args.email;
 			if (!email) throw new Error('email is required (use --email or --raw {"email":"..."})');
 			const userUri = cmdOpts.userUri ?? args.user_uri;
 			const organizationUri = cmdOpts.organizationUri ?? args.organization_uri;
 			const status = cmdOpts.status ?? args.status;
-			const minStartTime = cmdOpts.minStartTime ?? args.min_start_time;
-			const maxStartTime = cmdOpts.maxStartTime ?? args.max_start_time;
+			const { min_start_time: minStartTime, max_start_time: maxStartTime } = normalizeDateRange({
+				min_start_time: cmdOpts.minStartTime ?? args.min_start_time,
+				max_start_time: cmdOpts.maxStartTime ?? args.max_start_time,
+			});
+			const apiKey = process.env.CALENDLY_API_KEY;
+			if (!apiKey) throw new Error('CALENDLY_API_KEY environment variable is required');
 			const pageSizeInput = Number(cmdOpts.pageSize ?? args.page_size ?? 100);
 			const maxPagesInput = Number(cmdOpts.maxPages ?? args.max_pages ?? 20);
 			if (!Number.isFinite(pageSizeInput) || !Number.isFinite(maxPagesInput)) {
@@ -856,11 +830,10 @@ program
 	.action(async (cmdOpts) => {
 		const globalOptions = program.opts();
 		try {
-			const apiKey = process.env.CALENDLY_API_KEY;
-			if (!apiKey) throw new Error('CALENDLY_API_KEY environment variable is required');
-
 			const rawArgs = cmdOpts.raw ? JSON.parse(cmdOpts.raw) : ({} as Record<string, unknown>);
 			const query = normalizeTeamSearchOptions(cmdOpts as Record<string, unknown>, rawArgs);
+			const apiKey = process.env.CALENDLY_API_KEY;
+			if (!apiKey) throw new Error('CALENDLY_API_KEY environment variable is required');
 			const timeout = globalOptions.timeout || 30000;
 			const memberships: any[] = [];
 			let membershipPageToken: string | undefined;

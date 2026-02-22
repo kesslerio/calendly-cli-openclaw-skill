@@ -16,7 +16,10 @@ Interact with Calendly scheduling via MCP-generated CLI.
 calendly get-current-user
 
 # List RECENT events (always use --min-start-time for recent queries!)
-calendly list-events --user-uri "<YOUR_USER_URI>" --min-start-time "2026-01-20T00:00:00Z"
+calendly list-events \
+  --user-uri "<YOUR_USER_URI>" \
+  --min-start-time "2026-01-20T00:00:00Z" \
+  --max-start-time "2026-01-27T23:59:59Z"
 
 # Get event details
 calendly get-event --event-uuid <UUID>
@@ -167,6 +170,11 @@ MCPORTER_CONFIG=./mcporter.json npx mcporter@latest generate-cli --server calend
 ## Important: Time Filtering
 
 **Always use `--min-start-time` when querying recent events!**
+
+Date bounds are validated:
+- `--min-start-time` and `--max-start-time` must be ISO-8601 timestamps (for example `2026-01-20T00:00:00Z`)
+- when both are provided, `min-start-time` must be less than or equal to `max-start-time`
+- validation is the same for normal flags and `--raw` input
 
 The API returns events oldest-first by default and doesn't support pagination via CLI. Without a time filter, you'll get events from years ago.
 
