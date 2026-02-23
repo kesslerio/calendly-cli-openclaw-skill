@@ -9,7 +9,7 @@ Moltbot skill for Calendly integration. List events, check availability, manage 
 - **Invitee Management**: View event invitees
 - **Organization**: List organization memberships
 
-> **Note:** This CLI now includes `list-event-types` and `get-event-type-availability` with strict argument validation and MCP-first + REST fallback support. `schedule-event` still depends on calendly-mcp-server v2.0.0 being published to npm.
+> **Note:** This CLI now includes `list-event-types`, `get-event-type`, and `get-event-type-availability` with strict argument validation and MCP-first + REST fallback support. `schedule-event` still depends on calendly-mcp-server v2.0.0 being published to npm.
 
 ## Installation
 
@@ -132,6 +132,17 @@ Validation rules:
 - at least one scope is required: `--user-uri` or `--organization-uri` (same in `--raw` mode)
 - `--count` is optional; when set, it must be an integer between 1 and 100
 
+### Get Event Type Details
+
+```bash
+./calendly get-event-type \
+  --event-type-uri "https://api.calendly.com/event_types/<EVENT_TYPE_UUID>" \
+  -o json
+```
+
+Validation rules:
+- `--event-type-uri` is required (also enforced for `--raw` JSON).
+
 ### Get Event Details
 
 ```bash
@@ -187,6 +198,7 @@ Signing secret handling guidance:
 - `list-events-with-invitees` - Compatibility alias for include-invitees path
 - `get-event` - Get event details
 - `list-event-types` - List available event types for scheduling (requires at least one of `--user-uri` or `--organization-uri`)
+- `get-event-type` - Get details for a specific event type (requires `--event-type-uri`)
 - `get-event-type-availability` - Get available time slots for a specific event type
 - `cancel-event` - Cancel an event
 - `list-event-invitees` - List invitees for a specific event

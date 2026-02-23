@@ -7,7 +7,7 @@ description: Calendly scheduling integration. List events, check availability, m
 
 Interact with Calendly scheduling via MCP-generated CLI.
 
-> **Note:** This CLI includes `list-event-types` and `get-event-type-availability` with strict input validation and MCP-first + REST fallback. `schedule-event` still requires calendly-mcp-server v2.0.0 on npm.
+> **Note:** This CLI includes `list-event-types`, `get-event-type`, and `get-event-type-availability` with strict input validation and MCP-first + REST fallback. `schedule-event` still requires calendly-mcp-server v2.0.0 on npm.
 
 ## Quick Start
 
@@ -38,6 +38,7 @@ calendly cancel-event --event-uuid <UUID> --reason "Rescheduling needed"
 - `list-events-with-invitees` - Compatibility alias for include-invitees path
 - `get-event` - Get event details (requires --event-uuid)
 - `list-event-types` - List schedulable event types (requires `--user-uri` or `--organization-uri`; optional `--count`)
+- `get-event-type` - Get event type details (requires `--event-type-uri`)
 - `get-event-type-availability` - Get available slots for an event type (`--event-type-uri`, `--start-time`, `--end-time`; optional `--timezone`)
 - `cancel-event` - Cancel an event (requires --event-uuid, optional --reason)
 
@@ -105,6 +106,11 @@ calendly list-events \
 # Get event details
 calendly get-event \
   --event-uuid "<EVENT_UUID>" \
+  -o json
+
+# Get event type details
+calendly get-event-type \
+  --event-type-uri "https://api.calendly.com/event_types/<EVENT_TYPE_UUID>" \
   -o json
 
 # Get event type availability
@@ -229,5 +235,5 @@ calendly list-events --user-uri "<URI>" --min-start-time "$(date -u +%Y-%m-%dT%H
 ---
 
 **Generated:** 2026-01-20  
-**Updated:** 2026-02-23 (Added list-event-types command plus validation + MCP-first REST fallback)
+**Updated:** 2026-02-23 (Added get-event-type command plus validation + MCP-first REST fallback)
 **Source:** meAmitPatil/calendly-mcp-server via mcporter
