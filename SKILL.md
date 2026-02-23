@@ -7,7 +7,7 @@ description: Calendly scheduling integration. List events, check availability, m
 
 Interact with Calendly scheduling via MCP-generated CLI.
 
-> **Note:** Scheduling API features (list-event-types, get-event-type-availability, schedule-event) will be available once calendly-mcp-server v2.0.0 is published to npm. Current CLI uses v1.0.0 for portability.
+> **Note:** This CLI includes `get-event-type-availability` with strict input validation and REST fallback. Remaining Scheduling API features (`list-event-types`, `schedule-event`) still require calendly-mcp-server v2.0.0 on npm.
 
 ## Quick Start
 
@@ -37,6 +37,7 @@ calendly cancel-event --event-uuid <UUID> --reason "Rescheduling needed"
 - `list-events` - List scheduled events (requires --user-uri); add `--include-invitees` for expand + bounded fallback invitee hydration
 - `list-events-with-invitees` - Compatibility alias for include-invitees path
 - `get-event` - Get event details (requires --event-uuid)
+- `get-event-type-availability` - Get available slots for an event type (`--event-type-uri`, `--start-time`, `--end-time`; optional `--timezone`)
 - `cancel-event` - Cancel an event (requires --event-uuid, optional --reason)
 
 ### Invitees
@@ -105,6 +106,14 @@ calendly get-event \
   --event-uuid "<EVENT_UUID>" \
   -o json
 
+# Get event type availability
+calendly get-event-type-availability \
+  --event-type-uri "https://api.calendly.com/event_types/<EVENT_TYPE_UUID>" \
+  --start-time "2026-03-01T00:00:00Z" \
+  --end-time "2026-03-02T00:00:00Z" \
+  --timezone "America/New_York" \
+  -o json
+
 # Batch invitee lookup for multiple events
 calendly batch-event-invitees \
   --event-uri "https://api.calendly.com/scheduled_events/<EVENT_UUID_1>" \
@@ -144,19 +153,16 @@ Webhook signing secret guidance:
 - Verify Calendly webhook signatures in your receiver with the same secret used at subscription creation.
 - If using `--scope user`, include `--user-uri "https://api.calendly.com/users/<USER_UUID>"`.
 
-## Coming Soon: Scheduling API (v2.0)
+## Remaining Scheduling API (v2.0)
 
-Once calendly-mcp-server v2.0.0 is published, these commands will be available:
+Once calendly-mcp-server v2.0.0 is published, these additional commands will be available:
 
 ### Scheduling Workflow
 ```bash
 # 1. List available event types
 calendly list-event-types
 
-# 2. Check availability for a specific event type
-calendly get-event-type-availability --event-type "<EVENT_TYPE_URI>"
-
-# 3. Schedule a meeting (requires paid Calendly plan)
+# 2. Schedule a meeting (requires paid Calendly plan)
 calendly schedule-event \
   --event-type "<EVENT_TYPE_URI>" \
   --start-time "2026-01-25T19:00:00Z" \
@@ -219,5 +225,5 @@ calendly list-events --user-uri "<URI>" --min-start-time "$(date -u +%Y-%m-%dT%H
 ---
 
 **Generated:** 2026-01-20  
-**Updated:** 2026-02-22 (Webhook lifecycle guidance + invitee hydration fallback controls)
+**Updated:** 2026-02-23 (Added get-event-type-availability command with validation + REST fallback)
 **Source:** meAmitPatil/calendly-mcp-server via mcporter
