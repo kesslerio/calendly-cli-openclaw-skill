@@ -11,6 +11,11 @@ import { normalizeListEventsQuery } from './src/list-events-query';
 import { fetchBatchEventInvitees, normalizeBatchEventInviteesQuery } from './src/batch-event-invitees';
 import { normalizeEventTypeAvailabilityQuery, shapeEventTypeAvailabilityResult } from './src/event-type-availability';
 import {
+	normalizeListEventTypesQuery,
+	shapeListEventTypesResult,
+	toListEventTypesMcpArgs,
+} from './src/list-event-types';
+import {
 	eventInviteeCount,
 	extractInviteePaginationMeta,
 	hydrateMissingInvitees,
@@ -126,6 +131,24 @@ const embeddedSchemas = {
       "count": {
         "type": "number",
         "description": "Number of events to return (default 20, max 100)"
+      }
+    },
+    "required": []
+  },
+  "list_event_types": {
+    "type": "object",
+    "properties": {
+      "user": {
+        "type": "string",
+        "description": "URI of the user whose event types to list"
+      },
+      "organization": {
+        "type": "string",
+        "description": "URI of the organization to filter event types"
+      },
+      "count": {
+        "type": "number",
+        "description": "Number of event types to return (default 20, max 100)"
       }
     },
     "required": []
@@ -288,6 +311,12 @@ const generatorTools = [
     "flags": "--email <email> [--min-start-time <min-start-time:iso-8601>] [--max-start-time <max-start-time:iso-8601>] [--status <status:active|canceled>] [--organization-uri <organization-uri>] [--count <count:number>] [--max-membership-pages <max-membership-pages:number>]"
   },
   {
+    "name": "list-event-types",
+    "description": "List available event types for scheduling meetings",
+    "usage": "list-event-types (--user-uri <user-uri> | --organization-uri <organization-uri>) [--count <count:number>] [--raw <json>]",
+    "flags": "(--user-uri <user-uri> | --organization-uri <organization-uri>) [--count <count:number>] [--raw <json>]"
+  },
+  {
     "name": "get-event-type-availability",
     "description": "Get available time slots for a specific event type",
     "usage": "get-event-type-availability --event-type-uri <event-type-uri> --start-time <start-time:iso-8601> --end-time <end-time:iso-8601> [--timezone <timezone>] [--raw <json>]",
@@ -407,6 +436,7 @@ const commandSignatures: Record<string, string> = {
   "list-events-with-invitees": "function list_events_with_invitees(user_uri?: string, organization_uri?: string, status?: \"active\" | \"canceled\", max_start_time?: string, min_start_time?: string, count?: number, hydrate_invitees?: boolean, max_invitee_fetches?: number);",
   "search-invitees": "function search_invitees(email: string, user_uri?: string, organization_uri?: string, status?: \"active\" | \"canceled\", min_start_time?: string, max_start_time?: string, page_size?: number, max_pages?: number);",
   "search-team": "function search_team(email: string, min_start_time?: string, max_start_time?: string, status?: \"active\" | \"canceled\", organization_uri?: string, count?: number, max_membership_pages?: number);",
+  "list-event-types": "function list_event_types(user?: string, organization?: string, count?: number);",
   "get-event-type-availability": "function get_event_type_availability(event_type: string, start_time: string, end_time: string, timezone?: string);",
   "get-event": "function get_event(event_uuid: string);",
   "batch-event-invitees": "function batch_event_invitees(event_uri: string[], status?: \"active\" | \"canceled\", email?: string, count?: number, max_invitee_fetches?: number);",
@@ -487,6 +517,31 @@ async function fetchBatchEventInviteesResult(query: Record<string, unknown>, tim
 		normalizedQuery,
 		(eventUuid, pageToken, options) => fetchEventInviteesPage(apiKey, eventUuid, timeout, pageToken, options)
 	);
+}
+
+async function fetchListEventTypesResult(query: Record<string, unknown>, timeout: number): Promise<any> {
+	const apiKey = process.env.CALENDLY_API_KEY;
+	if (!apiKey) throw new Error('CALENDLY_API_KEY environment variable is required');
+
+	const params = new URLSearchParams();
+	if (typeof query.user_uri === 'string' && query.user_uri.length > 0) {
+		params.append('user', query.user_uri);
+	}
+	if (typeof query.organization_uri === 'string' && query.organization_uri.length > 0) {
+		params.append('organization', query.organization_uri);
+	}
+	if (typeof query.count === 'number' && Number.isFinite(query.count)) {
+		params.append('count', String(query.count));
+	}
+
+	const response = await axios.get(`https://api.calendly.com/event_types?${params.toString()}`, {
+		headers: {
+			'Authorization': `Bearer ${apiKey}`,
+			'Content-Type': 'application/json',
+		},
+		timeout,
+	});
+	return shapeListEventTypesResult(response.data, query);
 }
 
 async function fetchEventTypeAvailabilityResult(query: Record<string, unknown>, timeout: number): Promise<any> {
@@ -1076,6 +1131,63 @@ program
 		}
 	})
 	.addHelpText('after', () => '\nExample:\n  ' + "./calendly search-team --email person@example.com --organization-uri <ORG_URI> --count 25");
+
+program
+	.command("list-event-types")
+	.summary("list-event-types (--user-uri <user-uri> | --organization-uri <organization-uri>) [--count <count:number>] [--raw <json>]")
+	.description("List available event types for scheduling meetings")
+	.usage("(--user-uri <user-uri> | --organization-uri <organization-uri>) [--count <count:number>] [--raw <json>]")
+	.option('--raw <json>', 'Provide raw JSON arguments to the tool, bypassing flag parsing.')
+	.option("--user-uri <user-uri>", "URI of the user whose event types to list")
+	.option("--organization-uri <organization-uri>", "URI of the organization to filter event types")
+	.option("--count <count:number>", "Number of event types to return (default 20, max 100) (example: 20)", (value) => parseFloat(value))
+	.alias("list_event_types")
+	.action(async (cmdOpts) => {
+		const globalOptions = program.opts();
+		const timeout = globalOptions.timeout || 30000;
+		const rawArgs = cmdOpts.raw ? JSON.parse(cmdOpts.raw) : ({} as Record<string, unknown>);
+		const query = normalizeListEventTypesQuery(cmdOpts, rawArgs);
+		let mcpResult: unknown;
+		let mcpErrorMessage: string | undefined;
+		try {
+			const runtime = await ensureRuntime();
+			const serverName = embeddedName;
+			const proxy = createServerProxy(runtime, serverName, {
+				initialSchemas: embeddedSchemas,
+			});
+			try {
+				const call = (proxy.listEventTypes as any)(toListEventTypesMcpArgs(query));
+				mcpResult = await invokeWithTimeout(call, timeout);
+				const mcpRaw = createCallResult(mcpResult).raw as Record<string, unknown> | undefined;
+				if (mcpRaw && Array.isArray(mcpRaw.collection)) {
+					printResult(shapeListEventTypesResult(mcpRaw, query), globalOptions.output ?? 'text');
+					return;
+				}
+			} catch (error) {
+				mcpErrorMessage = error instanceof Error ? error.message : String(error);
+			} finally {
+				await runtime.close(serverName).catch(() => {});
+			}
+		} catch (error) {
+			mcpErrorMessage = error instanceof Error ? error.message : String(error);
+		}
+		try {
+			const restResult = await fetchListEventTypesResult(query, timeout);
+			printResult(restResult, globalOptions.output ?? 'text');
+		} catch (error) {
+			if (mcpResult !== undefined) {
+				printResult(mcpResult, globalOptions.output ?? 'text');
+				return;
+			}
+			let message = error instanceof Error ? error.message : String(error);
+			if (mcpErrorMessage) {
+				message = `${message} (MCP tool fallback failed: ${mcpErrorMessage})`;
+			}
+			console.error(`Error: ${message}`);
+			process.exit(1);
+		}
+	})
+	.addHelpText('after', () => '\nExample:\n  ' + "./calendly list-event-types --organization-uri https://api.calendly.com/organizations/ORG_123 --count 20");
 
 program
 	.command("get-event-type-availability")
