@@ -19,6 +19,13 @@ import {
 	toScheduleEventRestBody,
 } from './src/schedule-event';
 import {
+	normalizeRescheduleEventQuery,
+	shapeRescheduleEventResult,
+	toRescheduleEventMcpArgs,
+	toRescheduleEventRestBody,
+	toSafeRescheduleEventError,
+} from './src/reschedule-event';
+import {
 	normalizeListEventTypesQuery,
 	shapeListEventTypesResult,
 	toListEventTypesMcpArgs,
@@ -283,6 +290,42 @@ const embeddedSchemas = {
       "invitee_timezone"
     ]
   },
+  "reschedule_event": {
+    "type": "object",
+    "properties": {
+      "event_uuid": {
+        "type": "string",
+        "description": "UUID of the scheduled event to reschedule"
+      },
+      "invitee_uuid": {
+        "type": "string",
+        "description": "UUID of the invitee associated with the event (alternative identifier)"
+      },
+      "reschedule_url": {
+        "type": "string",
+        "description": "Calendly reschedule URL (alternative identifier source)"
+      },
+      "new_start_time": {
+        "type": "string",
+        "description": "New start time for the event (ISO 8601 format)"
+      },
+      "new_end_time": {
+        "type": "string",
+        "description": "Optional explicit new end time (ISO 8601 format)"
+      },
+      "event_type": {
+        "type": "string",
+        "description": "Optional event type URI override for the new slot"
+      },
+      "reason": {
+        "type": "string",
+        "description": "Optional reason shown in reschedule notifications"
+      }
+    },
+    "required": [
+      "new_start_time"
+    ]
+  },
   "get_event_type": {
     "type": "object",
     "properties": {
@@ -451,6 +494,12 @@ const generatorTools = [
     "flags": "--event-type <event-type-uri> --start-time <start-time:iso-8601> --invitee-email <invitee-email> --invitee-timezone <invitee-timezone> [--invitee-name <invitee-name>] [--invitee-first-name <invitee-first-name>] [--invitee-last-name <invitee-last-name>] [--invitee-phone <invitee-phone:e164>] [--location-kind <location-kind>] [--location-details <location-details>] [--event-guest <event-guest>] [--questions-and-answers <questions-and-answers:json>] [--questions <questions:json>] [--utm-source <utm-source>] [--utm-campaign <utm-campaign>] [--utm-medium <utm-medium>] [--raw <json>]"
   },
   {
+    "name": "reschedule-event",
+    "description": "Reschedule an existing scheduled event to a new start time",
+    "usage": "reschedule-event (--event-uuid <event-uuid> | --invitee-uuid <invitee-uuid> | --reschedule-url <reschedule-url>) --new-start-time <new-start-time:iso-8601> [--event-type <event-type-uri>] [--new-end-time <new-end-time:iso-8601>] [--reason <reason>] [--event-uri <event-uri>] [--invitee-uri <invitee-uri>] [--raw <json>]",
+    "flags": "(--event-uuid <event-uuid> | --invitee-uuid <invitee-uuid> | --reschedule-url <reschedule-url>) --new-start-time <new-start-time:iso-8601> [--event-type <event-type-uri>] [--new-end-time <new-end-time:iso-8601>] [--reason <reason>] [--event-uri <event-uri>] [--invitee-uri <invitee-uri>] [--raw <json>]"
+  },
+  {
     "name": "get-event",
     "description": "Get details of a specific event",
     "usage": "get-event --event-uuid <event-uuid> [--raw <json>]",
@@ -568,6 +617,7 @@ const commandSignatures: Record<string, string> = {
   "get-event-type": "function get_event_type(event_type: string);",
   "get-event-type-availability": "function get_event_type_availability(event_type: string, start_time: string, end_time: string, timezone?: string);",
   "schedule-event": "function schedule_event(event_type: string, start_time: string, invitee_email: string, invitee_timezone: string, invitee_name?: string, invitee_first_name?: string, invitee_last_name?: string, invitee_phone?: string, location_kind?: string, location_details?: string, event_guests?: string[], questions_and_answers?: {question: string, answer: string, position: number}[], utm_source?: string, utm_campaign?: string, utm_medium?: string);",
+  "reschedule-event": "function reschedule_event(new_start_time: string, event_uuid?: string, invitee_uuid?: string, reschedule_url?: string, new_end_time?: string, event_type?: string, reason?: string);",
   "get-event": "function get_event(event_uuid: string);",
   "batch-event-invitees": "function batch_event_invitees(event_uri: string[], status?: \"active\" | \"canceled\", email?: string, count?: number, max_invitee_fetches?: number);",
   "list-event-invitees": "function list_event_invitees(event_uuid: string, status?: \"active\" | \"canceled\", email?: string, count?: number);",
@@ -714,6 +764,124 @@ async function fetchEventTypeAvailabilityResult(query: Record<string, unknown>, 
 	return shapeEventTypeAvailabilityResult(response.data, query as any);
 }
 
+function toObjectRecord(value: unknown): Record<string, unknown> {
+	return value && typeof value === 'object' ? { ...(value as Record<string, unknown>) } : {};
+}
+
+function pickStringValue(...values: unknown[]): string | undefined {
+	for (const value of values) {
+		if (typeof value === 'string' && value.trim()) {
+			return value;
+		}
+	}
+	return undefined;
+}
+
+function parseUuidFromSegment(uri: string | undefined, segment: string): string | undefined {
+	if (!uri) {
+		return undefined;
+	}
+	const regex = new RegExp(`/${segment}/([^/?#]+)(?:[/?#]|$)`);
+	const match = uri.match(regex);
+	return match && match[1] ? match[1] : undefined;
+}
+
+async function fetchBookingInviteeResource(inviteeUuid: string, timeout: number): Promise<Record<string, unknown>> {
+	const response = await axios.get(`https://calendly.com/api/booking/invitees/${encodeURIComponent(inviteeUuid)}`, {
+		headers: {
+			'Content-Type': 'application/json',
+		},
+		timeout,
+	});
+	return toObjectRecord(response.data);
+}
+
+function extractInviteeUuid(value: unknown): string | undefined {
+	const record = toObjectRecord(value);
+	const inviteeUri = pickStringValue(
+		record.uri,
+		record.invitee_uri,
+		toObjectRecord(record.invitee).uri
+	);
+	return parseUuidFromSegment(inviteeUri, 'invitees') ?? pickStringValue(record.uuid);
+}
+
+async function resolveInviteeUuidFromEvent(
+	apiKey: string,
+	eventUuid: string,
+	timeout: number
+): Promise<string | undefined> {
+	const collectInviteeUuids = (collection: unknown[]): string[] => {
+		const uuids = collection
+			.map((entry) => extractInviteeUuid(entry))
+			.filter((value): value is string => typeof value === 'string' && value.length > 0);
+		return [...new Set(uuids)];
+	};
+
+	const activeInvitees = await fetchEventInviteesPage(apiKey, eventUuid, timeout, undefined, {
+		status: 'active',
+		count: 2,
+	});
+	const activeUuids = collectInviteeUuids(Array.isArray(activeInvitees.collection) ? activeInvitees.collection : []);
+	if (activeUuids.length > 1) {
+		throw new Error('Multiple active invitees found for --event-uuid. Provide --invitee-uuid or --invitee-uri.');
+	}
+	if (activeUuids.length === 1) {
+		return activeUuids[0];
+	}
+
+	const anyInvitees = await fetchEventInviteesPage(apiKey, eventUuid, timeout, undefined, {
+		count: 2,
+	});
+	const anyUuids = collectInviteeUuids(Array.isArray(anyInvitees.collection) ? anyInvitees.collection : []);
+	if (anyUuids.length > 1) {
+		throw new Error('Multiple invitees found for --event-uuid. Provide --invitee-uuid or --invitee-uri.');
+	}
+	return anyUuids[0];
+}
+
+async function resolveRescheduleEventQuery(
+	query: Record<string, unknown>,
+	apiKey: string,
+	timeout: number
+): Promise<Record<string, unknown>> {
+	let inviteeUuid = pickStringValue(query.invitee_uuid);
+	const eventUuid = pickStringValue(query.event_uuid);
+
+	if (!inviteeUuid && eventUuid) {
+		inviteeUuid = await resolveInviteeUuidFromEvent(apiKey, eventUuid, timeout);
+	}
+	if (!inviteeUuid) {
+		throw new Error('Unable to determine invitee_uuid for rescheduling. Provide --invitee-uuid/--invitee-uri, --reschedule-url, or an event with invitees.');
+	}
+
+	const inviteeResource = await fetchBookingInviteeResource(inviteeUuid, timeout);
+	const inviteeTimezone = pickStringValue(inviteeResource.timezone);
+	const inviteeTimeNotation = pickStringValue(inviteeResource.time_notation);
+	if (!inviteeTimezone || !inviteeTimeNotation) {
+		throw new Error('Unable to determine invitee timezone/time notation for rescheduling.');
+	}
+	const resolvedInviteeUuid = extractInviteeUuid(inviteeResource) ?? inviteeUuid;
+	const inviteeEventUri = pickStringValue(
+		toObjectRecord(inviteeResource.event).uri,
+		inviteeResource.event_uri,
+		inviteeResource.event
+	);
+	const eventUuidFromInvitee = parseUuidFromSegment(inviteeEventUri, 'scheduled_events');
+	if (eventUuid && eventUuidFromInvitee && eventUuid !== eventUuidFromInvitee) {
+		throw new Error('Provided --event-uuid does not match the event linked to --invitee-uuid/--reschedule-url.');
+	}
+
+	return {
+		...query,
+		invitee_uuid: resolvedInviteeUuid,
+		...(eventUuid ?? eventUuidFromInvitee ? { event_uuid: eventUuid ?? eventUuidFromInvitee } : {}),
+		invitee_timezone: inviteeTimezone,
+		invitee_time_notation: inviteeTimeNotation,
+		is_publisher: false,
+	};
+}
+
 async function fetchScheduleEventResult(query: Record<string, unknown>, timeout: number): Promise<any> {
 	const apiKey = process.env.CALENDLY_API_KEY;
 	if (!apiKey) throw new Error('CALENDLY_API_KEY environment variable is required');
@@ -730,6 +898,26 @@ async function fetchScheduleEventResult(query: Record<string, unknown>, timeout:
 		}
 	);
 	return shapeScheduleEventResult(response.data, query as any);
+}
+
+async function fetchRescheduleEventResult(query: Record<string, unknown>, timeout: number): Promise<any> {
+	const apiKey = process.env.CALENDLY_API_KEY;
+	if (!apiKey) throw new Error('CALENDLY_API_KEY environment variable is required');
+
+	const resolvedQuery = await resolveRescheduleEventQuery(query, apiKey, timeout);
+	const inviteeUuid = String(resolvedQuery.invitee_uuid);
+	const response = await axios.patch(
+		`https://calendly.com/api/booking/invitees/${encodeURIComponent(inviteeUuid)}`,
+		toRescheduleEventRestBody(resolvedQuery as any),
+		{
+			headers: {
+				'Content-Type': 'application/json',
+				'Booking-Request-ID': `reschedule-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+			},
+			timeout,
+		}
+	);
+	return shapeRescheduleEventResult(response.data, resolvedQuery as any);
 }
 
 async function fetchScheduledEventsWithInvitees(query: Record<string, unknown>, timeout: number): Promise<any> {
@@ -1546,6 +1734,68 @@ program
 		}
 	})
 	.addHelpText('after', () => '\nExample:\n  ' + "./calendly schedule-event --event-type https://api.calendly.com/event_types/ET_123 --start-time 2099-03-01T15:00:00Z --invitee-email invitee@example.com --invitee-name \"Jane Doe\" --invitee-timezone America/New_York --questions '{\"Company\":\"Acme\"}'");
+
+program
+	.command("reschedule-event")
+	.summary("reschedule-event (--event-uuid <event-uuid> | --invitee-uuid <invitee-uuid> | --reschedule-url <reschedule-url>) --new-start-time <new-start-time:iso-8601> [--event-type <event-type-uri>] [--new-end-time <new-end-time:iso-8601>] [--reason <reason>] [--event-uri <event-uri>] [--invitee-uri <invitee-uri>] [--raw <json>]")
+	.description("Reschedule an existing meeting to a new start time (MCP-first with REST fallback)")
+	.usage("(--event-uuid <event-uuid> | --invitee-uuid <invitee-uuid> | --reschedule-url <reschedule-url>) --new-start-time <new-start-time:iso-8601> [--event-type <event-type-uri>] [--new-end-time <new-end-time:iso-8601>] [--reason <reason>] [--event-uri <event-uri>] [--invitee-uri <invitee-uri>] [--raw <json>]")
+	.option('--raw <json>', 'Provide raw JSON arguments to the tool, bypassing flag parsing.')
+	.option("--event-uuid <event-uuid>", "Scheduled event UUID to reschedule")
+	.option("--event-uri <event-uri>", "Scheduled event URI (alternative to --event-uuid)")
+	.option("--invitee-uuid <invitee-uuid>", "Invitee UUID (alternative identifier when event UUID is unknown)")
+	.option("--invitee-uri <invitee-uri>", "Invitee URI (alternative identifier when event UUID is unknown)")
+	.option("--reschedule-url <reschedule-url>", "Calendly reschedule URL to extract event/invitee identifiers")
+	.option("--new-start-time <new-start-time:iso-8601>", "New event start time (ISO 8601; must be in the future)")
+	.option("--start-time <start-time:iso-8601>", "Compatibility alias for --new-start-time")
+	.option("--new-end-time <new-end-time:iso-8601>", "Optional explicit new end time (otherwise derived from current event duration)")
+	.option("--event-type <event-type-uri>", "Optional event type URI override (normally derived from existing event)")
+	.option("--reason <reason>", "Optional reason included in reschedule notifications")
+	.alias("reschedule_event")
+	.action(async (cmdOpts) => {
+		const globalOptions = program.opts();
+		const timeout = globalOptions.timeout || 30000;
+		const rawArgs = cmdOpts.raw ? JSON.parse(cmdOpts.raw) : ({} as Record<string, unknown>);
+		const query = normalizeRescheduleEventQuery(cmdOpts, rawArgs);
+		let mcpErrorMessage: string | undefined;
+		try {
+			const runtime = await ensureRuntime();
+			const serverName = embeddedName;
+			const proxy = createServerProxy(runtime, serverName, {
+				initialSchemas: embeddedSchemas,
+			});
+			try {
+				const call = (proxy.rescheduleEvent as any)(toRescheduleEventMcpArgs(query));
+				const mcpResult = await invokeWithTimeout(call, timeout);
+				const mcpRaw = createCallResult(mcpResult).raw as Record<string, unknown> | undefined;
+				if (mcpRaw && (mcpRaw.resource || mcpRaw.uri || mcpRaw.event || mcpRaw.scheduled_event)) {
+					printResult(shapeRescheduleEventResult(mcpRaw, query), globalOptions.output ?? 'text');
+					return;
+				}
+				printResult(mcpResult, globalOptions.output ?? 'text');
+				return;
+			} catch (error) {
+				mcpErrorMessage = error instanceof Error ? error.message : String(error);
+			} finally {
+				await runtime.close(serverName).catch(() => {});
+			}
+		} catch (error) {
+			mcpErrorMessage = error instanceof Error ? error.message : String(error);
+		}
+
+		try {
+			const restResult = await fetchRescheduleEventResult(query, timeout);
+			printResult(restResult, globalOptions.output ?? 'text');
+		} catch (error) {
+			let message = toSafeRescheduleEventError(error);
+			if (mcpErrorMessage) {
+				message = `${message} (MCP tool fallback failed: ${mcpErrorMessage})`;
+			}
+			console.error(`Error: ${message}`);
+			process.exit(1);
+		}
+	})
+	.addHelpText('after', () => '\nExample:\n  ' + "./calendly reschedule-event --event-uuid EVT_123 --new-start-time 2099-03-02T16:00:00Z --reason \"Conflict with another meeting\"");
 
 program
 	.command("get-event")

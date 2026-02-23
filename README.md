@@ -5,11 +5,11 @@ Moltbot skill for Calendly integration. List events, check availability, manage 
 ## Features
 
 - **User Info**: Get authenticated user details
-- **Event Management**: List, view, schedule, and cancel events
+- **Event Management**: List, view, schedule, reschedule, and cancel events
 - **Invitee Management**: View event invitees
 - **Organization**: List organization memberships
 
-> **Note:** This CLI includes `schedule-event` with strict validation and MCP-first execution. If the MCP tool is unavailable, it safely falls back to Calendly REST (`POST /invitees`).
+> **Note:** This CLI includes `schedule-event` and `reschedule-event` with strict validation and MCP-first execution. If the MCP tool is unavailable, each command safely falls back to Calendly REST.
 
 ## Installation
 
@@ -177,6 +177,35 @@ Response includes normalized booking details when available:
 - `resource.add_to_calendar_links`
 - `resource.status`
 
+### Reschedule Event
+
+```bash
+./calendly reschedule-event \
+  --event-uuid "<EVENT_UUID>" \
+  --new-start-time "2099-03-02T16:00:00Z" \
+  --reason "Conflict with another meeting" \
+  -o json
+```
+
+Alternative identifier inputs:
+- `--event-uri "https://api.calendly.com/scheduled_events/<EVENT_UUID>"`
+- `--invitee-uuid "<INVITEE_UUID>"` or `--invitee-uri "https://api.calendly.com/invitees/<INVITEE_UUID>"`
+- `--reschedule-url "https://calendly.com/reschedulings/<INVITEE_UUID>?..."`
+
+Validation and behavior:
+- requires at least one identifier source: event UUID/URI, invitee UUID/URI, or reschedule URL
+- `--new-start-time` is required, must be ISO-8601, and must be in the future
+- `--new-end-time` is optional; when omitted, CLI derives it from the existing event duration
+- `--event-type` is optional; when omitted, CLI derives it from the existing event
+- `--reason` is optional and capped to 1000 characters
+
+Response includes normalized reschedule details when available:
+- `resource.event_uuid`
+- `resource.previous_event_uuid`
+- `resource.invitee_uuid`
+- `resource.new_start_time`
+- `resource.new_end_time`
+
 ### Get Event Details
 
 ```bash
@@ -235,6 +264,7 @@ Signing secret handling guidance:
 - `get-event-type` - Get details for a specific event type (requires `--event-type-uri`)
 - `get-event-type-availability` - Get available time slots for a specific event type
 - `schedule-event` - Schedule a meeting for an invitee on an organizer's event type
+- `reschedule-event` - Reschedule an existing scheduled event to a new start time
 - `cancel-event` - Cancel an event
 - `list-event-invitees` - List invitees for a specific event
 - `search-invitees` - Search events by invitee email across paginated results
@@ -274,6 +304,7 @@ Then use in conversations:
 ## Scheduling Notes
 
 - `schedule-event` requires a paid Calendly plan (Standard or higher). Free plans receive `403`.
+- `reschedule-event` requires paid-plan API access and can fail with clear messages for invalid identifiers, unavailable target slots, or payload validation.
 - Safe error messages are returned for common failures: invalid event type, unavailable slot, custom question validation, and plan restrictions.
 - For the most reliable bookings, fetch slots first via `get-event-type-availability` and then schedule exactly one returned `start_time`.
 
