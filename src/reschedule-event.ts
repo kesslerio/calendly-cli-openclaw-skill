@@ -32,9 +32,10 @@ export type RescheduleEventQuery = {
 };
 
 export type RescheduleEventResolvedQuery = RescheduleEventQuery & {
-	event_uuid: string;
-	new_end_time: string;
-	event_type: string;
+	invitee_uuid: string;
+	invitee_timezone: string;
+	invitee_time_notation: string;
+	is_publisher?: boolean;
 };
 
 type IdentifierSegment = 'scheduled_events' | 'invitees';
@@ -278,6 +279,22 @@ function pickString(...values: unknown[]): string | undefined {
 	return undefined;
 }
 
+function toDurationOverrideMinutes(newStartTime: string, newEndTime: string | undefined): number | undefined {
+	if (!newEndTime) {
+		return undefined;
+	}
+	const startMs = Date.parse(newStartTime);
+	const endMs = Date.parse(newEndTime);
+	if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+		return undefined;
+	}
+	const durationMinutes = (endMs - startMs) / 60000;
+	if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
+		return undefined;
+	}
+	return Math.round(durationMinutes);
+}
+
 function trimErrorDetail(value: string): string {
 	return value.replace(/\s+/g, ' ').trim().slice(0, 300);
 }
@@ -379,11 +396,25 @@ export function toRescheduleEventMcpArgs(query: RescheduleEventQuery): Record<st
 }
 
 export function toRescheduleEventRestBody(query: RescheduleEventResolvedQuery): Record<string, unknown> {
+	const durationOverride = toDurationOverrideMinutes(query.new_start_time, query.new_end_time);
+	const eventTypeUuid = parseUuidFromUri(query.event_type, 'event_types');
+
 	return {
-		event_type: query.event_type,
-		event_start_time: query.new_start_time,
-		event_end_time: query.new_end_time,
-		...(query.reason ? { reason: query.reason } : {}),
+		event: {
+			start_time: query.new_start_time,
+			...(durationOverride ? { duration_override: durationOverride } : {}),
+		},
+		...(eventTypeUuid ? { event_type_uuid: eventTypeUuid } : {}),
+		invitee: {
+			uuid: query.invitee_uuid,
+			timezone: query.invitee_timezone,
+			time_notation: query.invitee_time_notation,
+			...(query.reason ? { cancel_reason: query.reason } : {}),
+		},
+		rescheduling: {
+			invitee_uuid: query.invitee_uuid,
+			is_publisher: Boolean(query.is_publisher),
+		},
 	};
 }
 
@@ -400,9 +431,25 @@ export function shapeRescheduleEventResult(
 	const previousEventRecord = toRecord(resource.previous_event ?? resource.old_event);
 	const inviteeRecord = toRecord(resource.invitee);
 
-	const eventUri = pickString(resource.uri, resource.event, eventRecord.uri);
+	const resourceUri = pickString(resource.uri);
+	const resourceInviteeUuid = parseUuidFromUri(resourceUri, 'invitees');
+	const resourceEventUuid = parseUuidFromUri(resourceUri, 'scheduled_events');
+	const resourceUriAsInvitee = resourceInviteeUuid ? resourceUri : undefined;
+	const resourceUriAsEvent = resourceEventUuid && !resourceInviteeUuid ? resourceUri : undefined;
+
+	const eventUri = pickString(
+		resource.event_uri,
+		eventRecord.uri,
+		typeof resource.event === 'string' ? resource.event : undefined,
+		resourceUriAsEvent
+	);
 	const previousEventUri = pickString(resource.previous_event_uri, previousEventRecord.uri);
-	const inviteeUri = pickString(resource.invitee_uri, inviteeRecord.uri, resource.invitee);
+	const inviteeUri = pickString(
+		resource.invitee_uri,
+		inviteeRecord.uri,
+		typeof resource.invitee === 'string' ? resource.invitee : undefined,
+		resourceUriAsInvitee
+	);
 
 	return {
 		query: {

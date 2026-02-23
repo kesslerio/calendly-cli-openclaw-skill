@@ -3,6 +3,7 @@ import {
 	deriveEndTimeFromDuration,
 	extractRescheduleIdentifiers,
 	normalizeRescheduleEventQuery,
+	shapeRescheduleEventResult,
 	toRescheduleEventRestBody,
 	toSafeRescheduleEventError,
 } from './reschedule-event';
@@ -26,14 +27,13 @@ describe('normalizeRescheduleEventQuery', () => {
 
 	test('supports invitee URI and reschedule URL identifier extraction', () => {
 		const query = normalizeRescheduleEventQuery({
-			inviteeUri: 'https://api.calendly.com/invitees/INV_222',
 			newStartTime: FUTURE_START,
 		}, {
-			reschedule_url: 'https://calendly.com/reschedulings/INV_222?event=https%3A%2F%2Fapi.calendly.com%2Fscheduled_events%2FEVT_999',
+			reschedule_url: 'https://calendly.com/reschedulings/INV_222',
 		});
 
 		expect(query.invitee_uuid).toBe('INV_222');
-		expect(query.event_uuid).toBe('EVT_999');
+		expect(query.event_uuid).toBeUndefined();
 		expect(query.reschedule_url).toContain('https://calendly.com/reschedulings/INV_222');
 	});
 
@@ -87,23 +87,95 @@ describe('extractRescheduleIdentifiers', () => {
 			invitee_uuid: 'INV_55',
 		});
 	});
+
+	test('extracts invitee ID from bare reschedule URL path', () => {
+		const extracted = extractRescheduleIdentifiers('https://calendly.com/reschedulings/INV_99');
+		expect(extracted).toEqual({
+			invitee_uuid: 'INV_99',
+		});
+	});
 });
 
 describe('toRescheduleEventRestBody', () => {
-	test('maps normalized query into Calendly reschedulings payload', () => {
+	test('maps normalized query into Calendly invitee patch payload', () => {
 		const payload = toRescheduleEventRestBody({
-			event_uuid: 'EVT_123',
+			invitee_uuid: 'INV_123',
 			new_start_time: FUTURE_START,
-			new_end_time: '2099-03-01T15:30:00Z',
-			event_type: 'https://api.calendly.com/event_types/ET_123',
+			invitee_timezone: 'America/Los_Angeles',
+			invitee_time_notation: '12h',
 			reason: 'Conflict with another customer call',
 		});
 
 		expect(payload).toEqual({
-			event_type: 'https://api.calendly.com/event_types/ET_123',
-			event_start_time: FUTURE_START,
-			event_end_time: '2099-03-01T15:30:00Z',
-			reason: 'Conflict with another customer call',
+			event: {
+				start_time: FUTURE_START,
+			},
+			invitee: {
+				uuid: 'INV_123',
+				timezone: 'America/Los_Angeles',
+				time_notation: '12h',
+				cancel_reason: 'Conflict with another customer call',
+			},
+			rescheduling: {
+				invitee_uuid: 'INV_123',
+				is_publisher: false,
+			},
+		});
+	});
+
+	test('preserves duration and event type override when provided', () => {
+		const payload = toRescheduleEventRestBody({
+			invitee_uuid: 'INV_456',
+			new_start_time: FUTURE_START,
+			new_end_time: '2099-03-01T15:45:00Z',
+			event_type: 'https://api.calendly.com/event_types/ET_456',
+			invitee_timezone: 'America/New_York',
+			invitee_time_notation: '24h',
+		});
+
+		expect(payload).toEqual({
+			event: {
+				start_time: FUTURE_START,
+				duration_override: 45,
+			},
+			event_type_uuid: 'ET_456',
+			invitee: {
+				uuid: 'INV_456',
+				timezone: 'America/New_York',
+				time_notation: '24h',
+			},
+			rescheduling: {
+				invitee_uuid: 'INV_456',
+				is_publisher: false,
+			},
+		});
+	});
+});
+
+describe('shapeRescheduleEventResult', () => {
+	test('supports invitee-centric Calendly booking response shape', () => {
+		const shaped = shapeRescheduleEventResult(
+			{
+				uri: 'https://api.calendly.com/scheduled_events/EVT_NEW/invitees/INV_NEW',
+				event: {
+					uri: 'https://api.calendly.com/scheduled_events/EVT_NEW',
+					start_time: FUTURE_START,
+					end_time: '2099-03-01T15:40:00Z',
+					status: 'active',
+				},
+			},
+			{
+				new_start_time: FUTURE_START,
+				invitee_uuid: 'INV_OLD',
+				reschedule_url: 'https://calendly.com/reschedulings/INV_OLD',
+			}
+		);
+
+		expect(shaped.resource).toMatchObject({
+			event_uri: 'https://api.calendly.com/scheduled_events/EVT_NEW',
+			event_uuid: 'EVT_NEW',
+			invitee_uri: 'https://api.calendly.com/scheduled_events/EVT_NEW/invitees/INV_NEW',
+			invitee_uuid: 'INV_NEW',
 		});
 	});
 });

@@ -19,7 +19,6 @@ import {
 	toScheduleEventRestBody,
 } from './src/schedule-event';
 import {
-	deriveEndTimeFromDuration,
 	normalizeRescheduleEventQuery,
 	shapeRescheduleEventResult,
 	toRescheduleEventMcpArgs,
@@ -787,42 +786,58 @@ function parseUuidFromSegment(uri: string | undefined, segment: string): string 
 	return match && match[1] ? match[1] : undefined;
 }
 
-async function fetchScheduledEventResource(
+async function fetchBookingInviteeResource(inviteeUuid: string, timeout: number): Promise<Record<string, unknown>> {
+	const response = await axios.get(`https://calendly.com/api/booking/invitees/${encodeURIComponent(inviteeUuid)}`, {
+		headers: {
+			'Content-Type': 'application/json',
+		},
+		timeout,
+	});
+	return toObjectRecord(response.data);
+}
+
+function extractInviteeUuid(value: unknown): string | undefined {
+	const record = toObjectRecord(value);
+	const inviteeUri = pickStringValue(
+		record.uri,
+		record.invitee_uri,
+		toObjectRecord(record.invitee).uri
+	);
+	return parseUuidFromSegment(inviteeUri, 'invitees') ?? pickStringValue(record.uuid);
+}
+
+async function resolveInviteeUuidFromEvent(
 	apiKey: string,
 	eventUuid: string,
 	timeout: number
-): Promise<Record<string, unknown>> {
-	const response = await axios.get(`https://api.calendly.com/scheduled_events/${encodeURIComponent(eventUuid)}`, {
-		headers: {
-			'Authorization': `Bearer ${apiKey}`,
-			'Content-Type': 'application/json',
-		},
-		timeout,
-	});
-	const body = toObjectRecord(response.data);
-	if (body.resource && typeof body.resource === 'object') {
-		return toObjectRecord(body.resource);
-	}
-	return body;
-}
+): Promise<string | undefined> {
+	const collectInviteeUuids = (collection: unknown[]): string[] => {
+		const uuids = collection
+			.map((entry) => extractInviteeUuid(entry))
+			.filter((value): value is string => typeof value === 'string' && value.length > 0);
+		return [...new Set(uuids)];
+	};
 
-async function fetchInviteeResource(
-	apiKey: string,
-	inviteeUuid: string,
-	timeout: number
-): Promise<Record<string, unknown>> {
-	const response = await axios.get(`https://api.calendly.com/invitees/${encodeURIComponent(inviteeUuid)}`, {
-		headers: {
-			'Authorization': `Bearer ${apiKey}`,
-			'Content-Type': 'application/json',
-		},
-		timeout,
+	const activeInvitees = await fetchEventInviteesPage(apiKey, eventUuid, timeout, undefined, {
+		status: 'active',
+		count: 2,
 	});
-	const body = toObjectRecord(response.data);
-	if (body.resource && typeof body.resource === 'object') {
-		return toObjectRecord(body.resource);
+	const activeUuids = collectInviteeUuids(Array.isArray(activeInvitees.collection) ? activeInvitees.collection : []);
+	if (activeUuids.length > 1) {
+		throw new Error('Multiple active invitees found for --event-uuid. Provide --invitee-uuid or --invitee-uri.');
 	}
-	return body;
+	if (activeUuids.length === 1) {
+		return activeUuids[0];
+	}
+
+	const anyInvitees = await fetchEventInviteesPage(apiKey, eventUuid, timeout, undefined, {
+		count: 2,
+	});
+	const anyUuids = collectInviteeUuids(Array.isArray(anyInvitees.collection) ? anyInvitees.collection : []);
+	if (anyUuids.length > 1) {
+		throw new Error('Multiple invitees found for --event-uuid. Provide --invitee-uuid or --invitee-uri.');
+	}
+	return anyUuids[0];
 }
 
 async function resolveRescheduleEventQuery(
@@ -830,52 +845,40 @@ async function resolveRescheduleEventQuery(
 	apiKey: string,
 	timeout: number
 ): Promise<Record<string, unknown>> {
-	let eventUuid = pickStringValue(query.event_uuid);
-	const inviteeUuid = pickStringValue(query.invitee_uuid);
+	let inviteeUuid = pickStringValue(query.invitee_uuid);
+	const eventUuid = pickStringValue(query.event_uuid);
 
-	if (!eventUuid && inviteeUuid) {
-		const inviteeResource = await fetchInviteeResource(apiKey, inviteeUuid, timeout);
-		const inviteeEventUri = pickStringValue(
-			inviteeResource.event,
-			toObjectRecord(inviteeResource.event).uri,
-			inviteeResource.event_uri
-		);
-		eventUuid = parseUuidFromSegment(inviteeEventUri, 'scheduled_events');
-		if (!eventUuid) {
-			throw new Error('Unable to determine event_uuid from invitee_uuid. Provide --event-uuid or --event-uri.');
-		}
+	if (!inviteeUuid && eventUuid) {
+		inviteeUuid = await resolveInviteeUuidFromEvent(apiKey, eventUuid, timeout);
+	}
+	if (!inviteeUuid) {
+		throw new Error('Unable to determine invitee_uuid for rescheduling. Provide --invitee-uuid/--invitee-uri, --reschedule-url, or an event with invitees.');
 	}
 
-	if (!eventUuid) {
-		throw new Error('Unable to determine event_uuid for rescheduling. Provide --event-uuid, --event-uri, --invitee-uuid, or --reschedule-url.');
+	const inviteeResource = await fetchBookingInviteeResource(inviteeUuid, timeout);
+	const inviteeTimezone = pickStringValue(inviteeResource.timezone);
+	const inviteeTimeNotation = pickStringValue(inviteeResource.time_notation);
+	if (!inviteeTimezone || !inviteeTimeNotation) {
+		throw new Error('Unable to determine invitee timezone/time notation for rescheduling.');
 	}
-
-	let eventType = pickStringValue(query.event_type);
-	let newEndTime = pickStringValue(query.new_end_time);
-
-	if (!eventType || !newEndTime) {
-		const eventResource = await fetchScheduledEventResource(apiKey, eventUuid, timeout);
-		if (!eventType) {
-			eventType = pickStringValue(eventResource.event_type, toObjectRecord(eventResource.event_type).uri);
-			if (!eventType) {
-				throw new Error('Unable to determine event_type from the existing event. Provide --event-type.');
-			}
-		}
-		if (!newEndTime) {
-			const sourceStart = pickStringValue(eventResource.start_time);
-			const sourceEnd = pickStringValue(eventResource.end_time);
-			if (!sourceStart || !sourceEnd) {
-				throw new Error('Unable to determine event_end_time from the existing event. Provide --new-end-time.');
-			}
-			newEndTime = deriveEndTimeFromDuration(String(query.new_start_time), sourceStart, sourceEnd);
-		}
+	const resolvedInviteeUuid = extractInviteeUuid(inviteeResource) ?? inviteeUuid;
+	const inviteeEventUri = pickStringValue(
+		toObjectRecord(inviteeResource.event).uri,
+		inviteeResource.event_uri,
+		inviteeResource.event
+	);
+	const eventUuidFromInvitee = parseUuidFromSegment(inviteeEventUri, 'scheduled_events');
+	if (eventUuid && eventUuidFromInvitee && eventUuid !== eventUuidFromInvitee) {
+		throw new Error('Provided --event-uuid does not match the event linked to --invitee-uuid/--reschedule-url.');
 	}
 
 	return {
 		...query,
-		event_uuid: eventUuid,
-		event_type: eventType,
-		new_end_time: newEndTime,
+		invitee_uuid: resolvedInviteeUuid,
+		...(eventUuid ?? eventUuidFromInvitee ? { event_uuid: eventUuid ?? eventUuidFromInvitee } : {}),
+		invitee_timezone: inviteeTimezone,
+		invitee_time_notation: inviteeTimeNotation,
+		is_publisher: false,
 	};
 }
 
@@ -902,14 +905,14 @@ async function fetchRescheduleEventResult(query: Record<string, unknown>, timeou
 	if (!apiKey) throw new Error('CALENDLY_API_KEY environment variable is required');
 
 	const resolvedQuery = await resolveRescheduleEventQuery(query, apiKey, timeout);
-	const eventUuid = String(resolvedQuery.event_uuid);
-	const response = await axios.post(
-		`https://api.calendly.com/scheduled_events/${encodeURIComponent(eventUuid)}/reschedulings`,
+	const inviteeUuid = String(resolvedQuery.invitee_uuid);
+	const response = await axios.patch(
+		`https://calendly.com/api/booking/invitees/${encodeURIComponent(inviteeUuid)}`,
 		toRescheduleEventRestBody(resolvedQuery as any),
 		{
 			headers: {
-				'Authorization': `Bearer ${apiKey}`,
 				'Content-Type': 'application/json',
+				'Booking-Request-ID': `reschedule-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
 			},
 			timeout,
 		}
