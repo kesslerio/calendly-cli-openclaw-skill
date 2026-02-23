@@ -12,6 +12,13 @@ import { fetchBatchEventInvitees, normalizeBatchEventInviteesQuery } from './src
 import { normalizeEventTypeAvailabilityQuery, shapeEventTypeAvailabilityResult } from './src/event-type-availability';
 import { extractEventTypeUuid, normalizeGetEventTypeQuery, shapeGetEventTypeResult } from './src/get-event-type';
 import {
+	normalizeScheduleEventQuery,
+	shapeScheduleEventResult,
+	toSafeScheduleEventError,
+	toScheduleEventMcpArgs,
+	toScheduleEventRestBody,
+} from './src/schedule-event';
+import {
 	normalizeListEventTypesQuery,
 	shapeListEventTypesResult,
 	toListEventTypesMcpArgs,
@@ -180,6 +187,102 @@ const embeddedSchemas = {
       "end_time"
     ]
   },
+  "schedule_event": {
+    "type": "object",
+    "properties": {
+      "event_type": {
+        "type": "string",
+        "description": "URI of the event type to schedule"
+      },
+      "start_time": {
+        "type": "string",
+        "description": "Start time for the event (ISO 8601 UTC format, e.g., 2025-10-02T18:30:00Z)"
+      },
+      "invitee_name": {
+        "type": "string",
+        "description": "Full name of the invitee (alternative to first_name/last_name)"
+      },
+      "invitee_first_name": {
+        "type": "string",
+        "description": "First name of the invitee"
+      },
+      "invitee_last_name": {
+        "type": "string",
+        "description": "Last name of the invitee"
+      },
+      "invitee_email": {
+        "type": "string",
+        "description": "Email address of the invitee"
+      },
+      "invitee_timezone": {
+        "type": "string",
+        "description": "Timezone of the invitee (e.g., America/New_York)"
+      },
+      "invitee_phone": {
+        "type": "string",
+        "description": "Phone number for SMS reminders (E.164 format, e.g., +14155551234)"
+      },
+      "location_kind": {
+        "type": "string",
+        "description": "Type of meeting location (e.g., zoom_conference, google_conference, physical, ask_invitee)"
+      },
+      "location_details": {
+        "type": "string",
+        "description": "Location details (required for physical meetings or custom locations)"
+      },
+      "event_guests": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Array of additional email addresses to include (max 10)"
+      },
+      "questions_and_answers": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "question": {
+              "type": "string",
+              "description": "The question text (must match exactly)"
+            },
+            "answer": {
+              "type": "string",
+              "description": "The answer to the question"
+            },
+            "position": {
+              "type": "number",
+              "description": "Position of the question"
+            }
+          },
+          "required": [
+            "question",
+            "answer",
+            "position"
+          ]
+        },
+        "description": "Array of question and answer pairs for booking form"
+      },
+      "utm_source": {
+        "type": "string",
+        "description": "UTM tracking parameter for source"
+      },
+      "utm_campaign": {
+        "type": "string",
+        "description": "UTM tracking parameter for campaign"
+      },
+      "utm_medium": {
+        "type": "string",
+        "description": "UTM tracking parameter for medium"
+      }
+    },
+    "required": [
+      "event_type",
+      "start_time",
+      "invitee_email",
+      "invitee_timezone"
+    ]
+  },
   "get_event_type": {
     "type": "object",
     "properties": {
@@ -342,6 +445,12 @@ const generatorTools = [
     "flags": "--event-type-uri <event-type-uri> --start-time <start-time:iso-8601> --end-time <end-time:iso-8601> [--timezone <timezone>] [--raw <json>]"
   },
   {
+    "name": "schedule-event",
+    "description": "Schedule a meeting by creating an invitee for a specific event type and time",
+    "usage": "schedule-event --event-type <event-type-uri> --start-time <start-time:iso-8601> --invitee-email <invitee-email> --invitee-timezone <invitee-timezone> [--invitee-name <invitee-name>] [--invitee-first-name <invitee-first-name>] [--invitee-last-name <invitee-last-name>] [--invitee-phone <invitee-phone:e164>] [--location-kind <location-kind>] [--location-details <location-details>] [--event-guest <event-guest>] [--questions-and-answers <questions-and-answers:json>] [--questions <questions:json>] [--utm-source <utm-source>] [--utm-campaign <utm-campaign>] [--utm-medium <utm-medium>] [--raw <json>]",
+    "flags": "--event-type <event-type-uri> --start-time <start-time:iso-8601> --invitee-email <invitee-email> --invitee-timezone <invitee-timezone> [--invitee-name <invitee-name>] [--invitee-first-name <invitee-first-name>] [--invitee-last-name <invitee-last-name>] [--invitee-phone <invitee-phone:e164>] [--location-kind <location-kind>] [--location-details <location-details>] [--event-guest <event-guest>] [--questions-and-answers <questions-and-answers:json>] [--questions <questions:json>] [--utm-source <utm-source>] [--utm-campaign <utm-campaign>] [--utm-medium <utm-medium>] [--raw <json>]"
+  },
+  {
     "name": "get-event",
     "description": "Get details of a specific event",
     "usage": "get-event --event-uuid <event-uuid> [--raw <json>]",
@@ -458,6 +567,7 @@ const commandSignatures: Record<string, string> = {
   "list-event-types": "function list_event_types(user?: string, organization?: string, count?: number);",
   "get-event-type": "function get_event_type(event_type: string);",
   "get-event-type-availability": "function get_event_type_availability(event_type: string, start_time: string, end_time: string, timezone?: string);",
+  "schedule-event": "function schedule_event(event_type: string, start_time: string, invitee_email: string, invitee_timezone: string, invitee_name?: string, invitee_first_name?: string, invitee_last_name?: string, invitee_phone?: string, location_kind?: string, location_details?: string, event_guests?: string[], questions_and_answers?: {question: string, answer: string, position: number}[], utm_source?: string, utm_campaign?: string, utm_medium?: string);",
   "get-event": "function get_event(event_uuid: string);",
   "batch-event-invitees": "function batch_event_invitees(event_uri: string[], status?: \"active\" | \"canceled\", email?: string, count?: number, max_invitee_fetches?: number);",
   "list-event-invitees": "function list_event_invitees(event_uuid: string, status?: \"active\" | \"canceled\", email?: string, count?: number);",
@@ -602,6 +712,24 @@ async function fetchEventTypeAvailabilityResult(query: Record<string, unknown>, 
 		}
 	);
 	return shapeEventTypeAvailabilityResult(response.data, query as any);
+}
+
+async function fetchScheduleEventResult(query: Record<string, unknown>, timeout: number): Promise<any> {
+	const apiKey = process.env.CALENDLY_API_KEY;
+	if (!apiKey) throw new Error('CALENDLY_API_KEY environment variable is required');
+
+	const response = await axios.post(
+		'https://api.calendly.com/invitees',
+		toScheduleEventRestBody(query as any),
+		{
+			headers: {
+				'Authorization': `Bearer ${apiKey}`,
+				'Content-Type': 'application/json',
+			},
+			timeout,
+		}
+	);
+	return shapeScheduleEventResult(response.data, query as any);
 }
 
 async function fetchScheduledEventsWithInvitees(query: Record<string, unknown>, timeout: number): Promise<any> {
@@ -1350,6 +1478,74 @@ program
 		}
 	})
 	.addHelpText('after', () => '\nExample:\n  ' + "./calendly get-event-type-availability --event-type-uri https://api.calendly.com/event_types/ET_123 --start-time 2026-03-01T00:00:00Z --end-time 2026-03-02T00:00:00Z --timezone America/New_York");
+
+program
+	.command("schedule-event")
+	.summary("schedule-event --event-type <event-type-uri> --start-time <start-time:iso-8601> --invitee-email <invitee-email> --invitee-timezone <invitee-timezone> [--invitee-name <invitee-name>] [--invitee-first-name <invitee-first-name>] [--invitee-last-name <invitee-last-name>] [--invitee-phone <invitee-phone:e164>] [--location-kind <location-kind>] [--location-details <location-details>] [--event-guest <event-guest>] [--questions-and-answers <questions-and-answers:json>] [--questions <questions:json>] [--utm-source <utm-source>] [--utm-campaign <utm-campaign>] [--utm-medium <utm-medium>] [--raw <json>]")
+	.description("Schedule a meeting by creating an invitee for a specific event type and time")
+	.usage("--event-type <event-type-uri> --start-time <start-time:iso-8601> --invitee-email <invitee-email> --invitee-timezone <invitee-timezone> [--invitee-name <invitee-name>] [--invitee-first-name <invitee-first-name>] [--invitee-last-name <invitee-last-name>] [--invitee-phone <invitee-phone:e164>] [--location-kind <location-kind>] [--location-details <location-details>] [--event-guest <event-guest>] [--questions-and-answers <questions-and-answers:json>] [--questions <questions:json>] [--utm-source <utm-source>] [--utm-campaign <utm-campaign>] [--utm-medium <utm-medium>] [--raw <json>]")
+	.option('--raw <json>', 'Provide raw JSON arguments to the tool, bypassing flag parsing.')
+	.option("--event-type <event-type-uri>", "Event type URI to schedule")
+	.option("--start-time <start-time:iso-8601>", "Start time for the event (ISO 8601 format; must be in the future)")
+	.option("--invitee-email <invitee-email>", "Email address of the invitee")
+	.option("--invitee-timezone <invitee-timezone>", "Invitee timezone (IANA, example: America/New_York)")
+	.option("--invitee-name <invitee-name>", "Invitee full name (alternative to first/last name)")
+	.option("--invitee-first-name <invitee-first-name>", "Invitee first name")
+	.option("--invitee-last-name <invitee-last-name>", "Invitee last name")
+	.option("--invitee-phone <invitee-phone:e164>", "Invitee phone for SMS reminders in E.164 format")
+	.option("--location-kind <location-kind>", "Meeting location kind (zoom_conference, google_conference, physical, ask_invitee, etc.)")
+	.option("--location-details <location-details>", "Optional location details; requires --location-kind")
+	.option("--event-guest <event-guest>", "Additional guest email; repeat up to 10 entries", collectRepeatedString, [] as string[])
+	.option("--questions-and-answers <questions-and-answers:json>", "JSON array/object for booking questions (e.g. '[{\"question\":\"Company\",\"answer\":\"Acme\",\"position\":1}]')")
+	.option("--questions <questions:json>", "Compatibility alias for --questions-and-answers (JSON object or array)")
+	.option("--utm-source <utm-source>", "Optional UTM source")
+	.option("--utm-campaign <utm-campaign>", "Optional UTM campaign")
+	.option("--utm-medium <utm-medium>", "Optional UTM medium")
+	.alias("schedule_event")
+	.action(async (cmdOpts) => {
+		const globalOptions = program.opts();
+		const timeout = globalOptions.timeout || 30000;
+		const rawArgs = cmdOpts.raw ? JSON.parse(cmdOpts.raw) : ({} as Record<string, unknown>);
+		const query = normalizeScheduleEventQuery(cmdOpts, rawArgs);
+		let mcpErrorMessage: string | undefined;
+		try {
+			const runtime = await ensureRuntime();
+			const serverName = embeddedName;
+			const proxy = createServerProxy(runtime, serverName, {
+				initialSchemas: embeddedSchemas,
+			});
+			try {
+				const call = (proxy.scheduleEvent as any)(toScheduleEventMcpArgs(query));
+				const mcpResult = await invokeWithTimeout(call, timeout);
+				const mcpRaw = createCallResult(mcpResult).raw as Record<string, unknown> | undefined;
+				if (mcpRaw && (mcpRaw.resource || mcpRaw.uri || mcpRaw.event)) {
+					printResult(shapeScheduleEventResult(mcpRaw, query), globalOptions.output ?? 'text');
+					return;
+				}
+				printResult(mcpResult, globalOptions.output ?? 'text');
+				return;
+			} catch (error) {
+				mcpErrorMessage = error instanceof Error ? error.message : String(error);
+			} finally {
+				await runtime.close(serverName).catch(() => {});
+			}
+		} catch (error) {
+			mcpErrorMessage = error instanceof Error ? error.message : String(error);
+		}
+
+		try {
+			const restResult = await fetchScheduleEventResult(query, timeout);
+			printResult(restResult, globalOptions.output ?? 'text');
+		} catch (error) {
+			let message = toSafeScheduleEventError(error);
+			if (mcpErrorMessage) {
+				message = `${message} (MCP tool fallback failed: ${mcpErrorMessage})`;
+			}
+			console.error(`Error: ${message}`);
+			process.exit(1);
+		}
+	})
+	.addHelpText('after', () => '\nExample:\n  ' + "./calendly schedule-event --event-type https://api.calendly.com/event_types/ET_123 --start-time 2099-03-01T15:00:00Z --invitee-email invitee@example.com --invitee-name \"Jane Doe\" --invitee-timezone America/New_York --questions '{\"Company\":\"Acme\"}'");
 
 program
 	.command("get-event")
