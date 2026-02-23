@@ -9,7 +9,7 @@ Moltbot skill for Calendly integration. List events, check availability, manage 
 - **Invitee Management**: View event invitees
 - **Organization**: List organization memberships
 
-> **Note:** This CLI now includes `get-event-type-availability` with strict argument validation and REST fallback support. Other Scheduling API features (`list-event-types`, `schedule-event`) still depend on calendly-mcp-server v2.0.0 being published to npm.
+> **Note:** This CLI now includes `list-event-types` and `get-event-type-availability` with strict argument validation and MCP-first + REST fallback support. `schedule-event` still depends on calendly-mcp-server v2.0.0 being published to npm.
 
 ## Installation
 
@@ -119,6 +119,19 @@ Validation rules:
 - availability window must be 7 days or less.
 - `--timezone` is optional and must be a valid IANA timezone.
 
+### List Event Types
+
+```bash
+./calendly list-event-types \
+  --organization-uri "https://api.calendly.com/organizations/<ORG_UUID>" \
+  --count 20 \
+  -o json
+```
+
+Validation rules:
+- at least one scope is required: `--user-uri` or `--organization-uri` (same in `--raw` mode)
+- `--count` is optional; when set, it must be an integer between 1 and 100
+
 ### Get Event Details
 
 ```bash
@@ -173,6 +186,7 @@ Signing secret handling guidance:
 - `list-events` - List scheduled events (`--include-invitees` for expand + bounded fallback invitee hydration)
 - `list-events-with-invitees` - Compatibility alias for include-invitees path
 - `get-event` - Get event details
+- `list-event-types` - List available event types for scheduling (requires at least one of `--user-uri` or `--organization-uri`)
 - `get-event-type-availability` - Get available time slots for a specific event type
 - `cancel-event` - Cancel an event
 - `list-event-invitees` - List invitees for a specific event
@@ -219,11 +233,10 @@ Once calendly-mcp-server v2.0.0 is published to npm (adds the remaining Scheduli
 MCPORTER_CONFIG=./mcporter.json npx mcporter@latest generate-cli --server calendly --output calendly
 
 # Verify new commands appear
-./calendly --help | grep -E "list-event-types|schedule-event"
+./calendly --help | grep -E "schedule-event"
 ```
 
 The remaining v2.0 Scheduling API commands will add:
-- `list-event-types` - List available event types for scheduling
 - `schedule-event` - Schedule meetings programmatically
 
 **Requires:** Paid Calendly plan (Standard or higher)
