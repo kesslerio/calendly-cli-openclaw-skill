@@ -7,7 +7,7 @@ description: Calendly scheduling integration. List events, check availability, m
 
 Interact with Calendly scheduling via MCP-generated CLI.
 
-> **Note:** This CLI includes `schedule-event` with strict input validation and MCP-first execution. If MCP scheduling is unavailable, it falls back to Calendly REST (`POST /invitees`).
+> **Note:** This CLI includes `schedule-event` and `reschedule-event` with strict input validation and MCP-first execution. If MCP scheduling is unavailable, each command falls back to Calendly REST.
 
 ## Quick Start
 
@@ -41,6 +41,7 @@ calendly cancel-event --event-uuid <UUID> --reason "Rescheduling needed"
 - `get-event-type` - Get event type details (requires `--event-type-uri`)
 - `get-event-type-availability` - Get available slots for an event type (`--event-type-uri`, `--start-time`, `--end-time`; optional `--timezone`)
 - `schedule-event` - Schedule a meeting by booking an invitee into an event type
+- `reschedule-event` - Reschedule an existing meeting to a new start time using event/invitee identifiers
 - `cancel-event` - Cancel an event (requires --event-uuid, optional --reason)
 
 ### Invitees
@@ -132,6 +133,13 @@ calendly schedule-event \
   --questions '{"Company":"Acme"}' \
   -o json
 
+# Reschedule an event (requires paid plan)
+calendly reschedule-event \
+  --event-uuid "<EVENT_UUID>" \
+  --new-start-time "2099-03-02T16:00:00Z" \
+  --reason "Conflict with another meeting" \
+  -o json
+
 # List event types
 calendly list-event-types \
   --organization-uri "https://api.calendly.com/organizations/<ORG_UUID>" \
@@ -190,6 +198,13 @@ Validation behavior:
 - timezone must be valid IANA timezone
 - custom questions must be valid JSON object/array
 
+`reschedule-event` accepts flexible identifiers and normalizes them before execution:
+- Identifier source (at least one required): `--event-uuid`/`--event-uri` or `--invitee-uuid`/`--invitee-uri` or `--reschedule-url`
+- Required: `--new-start-time` (ISO-8601, future)
+- Optional: `--new-end-time` (must be after new start), `--event-type` (event type URI), `--reason`
+- When `--new-end-time` or `--event-type` is omitted, CLI derives values from the current scheduled event during REST fallback
+- REST fallback payload maps to Calendly rescheduling fields: `event_type`, `event_start_time`, `event_end_time`, and optional `reason`
+
 Plan and availability notes:
 - Paid Calendly plan (Standard or higher) is required; free plans return `403`.
 - To reduce booking conflicts, call `get-event-type-availability` first and pass one returned slot `start_time`.
@@ -238,5 +253,5 @@ calendly list-events --user-uri "<URI>" --min-start-time "$(date -u +%Y-%m-%dT%H
 ---
 
 **Generated:** 2026-01-20  
-**Updated:** 2026-02-23 (Added schedule-event command with validation + MCP-first REST fallback)
+**Updated:** 2026-02-23 (Added reschedule-event command with identifier extraction + MCP-first REST fallback)
 **Source:** meAmitPatil/calendly-mcp-server via mcporter
