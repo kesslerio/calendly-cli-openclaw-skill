@@ -5,11 +5,11 @@ Moltbot skill for Calendly integration. List events, check availability, manage 
 ## Features
 
 - **User Info**: Get authenticated user details
-- **Event Management**: List, view, and cancel scheduled events
+- **Event Management**: List, view, schedule, and cancel events
 - **Invitee Management**: View event invitees
 - **Organization**: List organization memberships
 
-> **Note:** This CLI now includes `list-event-types`, `get-event-type`, and `get-event-type-availability` with strict argument validation and MCP-first + REST fallback support. `schedule-event` still depends on calendly-mcp-server v2.0.0 being published to npm.
+> **Note:** This CLI includes `schedule-event` with strict validation and MCP-first execution. If the MCP tool is unavailable, it safely falls back to Calendly REST (`POST /invitees`).
 
 ## Installation
 
@@ -143,6 +143,40 @@ Validation rules:
 Validation rules:
 - `--event-type-uri` is required (also enforced for `--raw` JSON).
 
+### Schedule Event
+
+```bash
+./calendly schedule-event \
+  --event-type "https://api.calendly.com/event_types/<EVENT_TYPE_UUID>" \
+  --start-time "2099-03-01T15:00:00Z" \
+  --invitee-email "invitee@example.com" \
+  --invitee-name "Invitee Name" \
+  --invitee-timezone "America/New_York" \
+  --questions '{"Company":"Acme"}' \
+  -o json
+```
+
+Validation rules:
+- required args match upstream `calendly-mcp-server` scheduling branch signature: `event_type`, `start_time`, `invitee_email`, `invitee_timezone`
+- `--start-time` must be ISO-8601 and in the future
+- `--event-type` must be a Calendly event type URI
+- `--invitee-email` and optional `--event-guest` values must be valid emails
+- `--invitee-timezone` must be a valid IANA timezone
+- use either `--invitee-name` or `--invitee-first-name`/`--invitee-last-name`, not both
+- `--questions-and-answers` / `--questions` must be valid JSON object/array
+
+Optional scheduling fields:
+- `--invitee-phone` (E.164)
+- `--location-kind` and `--location-details`
+- repeated `--event-guest` (up to 10)
+- `--utm-source`, `--utm-campaign`, `--utm-medium`
+
+Response includes normalized booking details when available:
+- `resource.event_uuid`
+- `resource.meeting_link`
+- `resource.add_to_calendar_links`
+- `resource.status`
+
 ### Get Event Details
 
 ```bash
@@ -200,6 +234,7 @@ Signing secret handling guidance:
 - `list-event-types` - List available event types for scheduling (requires at least one of `--user-uri` or `--organization-uri`)
 - `get-event-type` - Get details for a specific event type (requires `--event-type-uri`)
 - `get-event-type-availability` - Get available time slots for a specific event type
+- `schedule-event` - Schedule a meeting for an invitee on an organizer's event type
 - `cancel-event` - Cancel an event
 - `list-event-invitees` - List invitees for a specific event
 - `search-invitees` - Search events by invitee email across paginated results
@@ -236,22 +271,11 @@ Then use in conversations:
 - "Cancel my 2pm meeting"
 - "Who's attending my next call?"
 
-## Upgrade to v2.0
+## Scheduling Notes
 
-Once calendly-mcp-server v2.0.0 is published to npm (adds the remaining Scheduling API surface), regenerate the CLI:
-
-```bash
-# Update to v2.0+
-MCPORTER_CONFIG=./mcporter.json npx mcporter@latest generate-cli --server calendly --output calendly
-
-# Verify new commands appear
-./calendly --help | grep -E "schedule-event"
-```
-
-The remaining v2.0 Scheduling API commands will add:
-- `schedule-event` - Schedule meetings programmatically
-
-**Requires:** Paid Calendly plan (Standard or higher)
+- `schedule-event` requires a paid Calendly plan (Standard or higher). Free plans receive `403`.
+- Safe error messages are returned for common failures: invalid event type, unavailable slot, custom question validation, and plan restrictions.
+- For the most reliable bookings, fetch slots first via `get-event-type-availability` and then schedule exactly one returned `start_time`.
 
 ## Development
 

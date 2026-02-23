@@ -7,7 +7,7 @@ description: Calendly scheduling integration. List events, check availability, m
 
 Interact with Calendly scheduling via MCP-generated CLI.
 
-> **Note:** This CLI includes `list-event-types`, `get-event-type`, and `get-event-type-availability` with strict input validation and MCP-first + REST fallback. `schedule-event` still requires calendly-mcp-server v2.0.0 on npm.
+> **Note:** This CLI includes `schedule-event` with strict input validation and MCP-first execution. If MCP scheduling is unavailable, it falls back to Calendly REST (`POST /invitees`).
 
 ## Quick Start
 
@@ -40,6 +40,7 @@ calendly cancel-event --event-uuid <UUID> --reason "Rescheduling needed"
 - `list-event-types` - List schedulable event types (requires `--user-uri` or `--organization-uri`; optional `--count`)
 - `get-event-type` - Get event type details (requires `--event-type-uri`)
 - `get-event-type-availability` - Get available slots for an event type (`--event-type-uri`, `--start-time`, `--end-time`; optional `--timezone`)
+- `schedule-event` - Schedule a meeting by booking an invitee into an event type
 - `cancel-event` - Cancel an event (requires --event-uuid, optional --reason)
 
 ### Invitees
@@ -121,6 +122,16 @@ calendly get-event-type-availability \
   --timezone "America/New_York" \
   -o json
 
+# Schedule an event (requires paid plan)
+calendly schedule-event \
+  --event-type "https://api.calendly.com/event_types/<EVENT_TYPE_UUID>" \
+  --start-time "2099-03-01T15:00:00Z" \
+  --invitee-email "invitee@example.com" \
+  --invitee-name "Invitee Name" \
+  --invitee-timezone "America/New_York" \
+  --questions '{"Company":"Acme"}' \
+  -o json
+
 # List event types
 calendly list-event-types \
   --organization-uri "https://api.calendly.com/organizations/<ORG_UUID>" \
@@ -166,30 +177,22 @@ Webhook signing secret guidance:
 - Verify Calendly webhook signatures in your receiver with the same secret used at subscription creation.
 - If using `--scope user`, include `--user-uri "https://api.calendly.com/users/<USER_UUID>"`.
 
-## Remaining Scheduling API (v2.0)
+## Scheduling Requirements
 
-Once calendly-mcp-server v2.0.0 is published, these additional commands will be available:
+`schedule-event` uses the upstream `calendly-mcp-server` scheduling signature:
+- Required: `event_type`, `start_time`, `invitee_email`, `invitee_timezone`
+- Optional: `invitee_name`, `invitee_first_name`, `invitee_last_name`, `invitee_phone`, `location_kind`, `location_details`, `event_guests`, `questions_and_answers`, `utm_source`, `utm_campaign`, `utm_medium`
 
-### Scheduling Workflow
-```bash
-# 1. Schedule a meeting (requires paid Calendly plan)
-calendly schedule-event \
-  --event-type "<EVENT_TYPE_URI>" \
-  --start-time "2026-01-25T19:00:00Z" \
-  --invitee-email "client@company.com" \
-  --invitee-name "John Smith" \
-  --invitee-timezone "America/New_York"
-```
+Validation behavior:
+- `start_time` must be ISO-8601 and in the future
+- `event_type` must be a Calendly event type URI
+- invitee and guest emails must be valid
+- timezone must be valid IANA timezone
+- custom questions must be valid JSON object/array
 
-**Scheduling API Requirements:**
-- calendly-mcp-server v2.0.0+ (unreleased as of 2026-02-23)
-- Paid Calendly plan (Standard or higher)
-
-To upgrade when v2.0 is published:
-```bash
-cd ~/clawd/skills/calendly
-MCPORTER_CONFIG=./mcporter.json npx mcporter@latest generate-cli --server calendly --output calendly
-```
+Plan and availability notes:
+- Paid Calendly plan (Standard or higher) is required; free plans return `403`.
+- To reduce booking conflicts, call `get-event-type-availability` first and pass one returned slot `start_time`.
 
 ## Important: Time Filtering
 
@@ -235,5 +238,5 @@ calendly list-events --user-uri "<URI>" --min-start-time "$(date -u +%Y-%m-%dT%H
 ---
 
 **Generated:** 2026-01-20  
-**Updated:** 2026-02-23 (Added get-event-type command plus validation + MCP-first REST fallback)
+**Updated:** 2026-02-23 (Added schedule-event command with validation + MCP-first REST fallback)
 **Source:** meAmitPatil/calendly-mcp-server via mcporter
