@@ -9,7 +9,7 @@ Moltbot skill for Calendly integration. List events, check availability, manage 
 - **Invitee Management**: View event invitees
 - **Organization**: List organization memberships
 
-> **Note:** Scheduling API features (list-event-types, get-event-type-availability, schedule-event) are available in calendly-mcp-server v2.0.0, which is currently unreleased. This skill uses v1.0.0 from npm for portability. See [Upgrade to v2.0](#upgrade-to-v20) for instructions once published.
+> **Note:** This CLI now includes `get-event-type-availability` with strict argument validation and REST fallback support. Other Scheduling API features (`list-event-types`, `schedule-event`) still depend on calendly-mcp-server v2.0.0 being published to npm.
 
 ## Installation
 
@@ -101,6 +101,24 @@ Supports repeated `--event-uri` flags plus `--raw` JSON (`event_uri` or `event_u
 - `meta.failed`: failed events
 - `meta.truncated`: `true` when the global fetch cap prevented full completion
 
+### Get Event Type Availability
+
+```bash
+./calendly get-event-type-availability \
+  --event-type-uri "https://api.calendly.com/event_types/<EVENT_TYPE_UUID>" \
+  --start-time "2026-03-01T00:00:00Z" \
+  --end-time "2026-03-02T00:00:00Z" \
+  --timezone "America/New_York" \
+  -o json
+```
+
+Validation rules:
+- `--event-type-uri`, `--start-time`, and `--end-time` are required (also enforced for `--raw` JSON).
+- `--start-time`/`--end-time` must be ISO-8601 timestamps.
+- `start-time` must be less than or equal to `end-time`.
+- availability window must be 7 days or less.
+- `--timezone` is optional and must be a valid IANA timezone.
+
 ### Get Event Details
 
 ```bash
@@ -155,6 +173,7 @@ Signing secret handling guidance:
 - `list-events` - List scheduled events (`--include-invitees` for expand + bounded fallback invitee hydration)
 - `list-events-with-invitees` - Compatibility alias for include-invitees path
 - `get-event` - Get event details
+- `get-event-type-availability` - Get available time slots for a specific event type
 - `cancel-event` - Cancel an event
 - `list-event-invitees` - List invitees for a specific event
 - `search-invitees` - Search events by invitee email across paginated results
@@ -193,19 +212,18 @@ Then use in conversations:
 
 ## Upgrade to v2.0
 
-Once calendly-mcp-server v2.0.0 is published to npm (adds Scheduling API with event types, availability, and programmatic scheduling), regenerate the CLI:
+Once calendly-mcp-server v2.0.0 is published to npm (adds the remaining Scheduling API surface), regenerate the CLI:
 
 ```bash
 # Update to v2.0+
 MCPORTER_CONFIG=./mcporter.json npx mcporter@latest generate-cli --server calendly --output calendly
 
 # Verify new commands appear
-./calendly --help | grep -E "list-event-types|get-event-type-availability|schedule-event"
+./calendly --help | grep -E "list-event-types|schedule-event"
 ```
 
-The v2.0 Scheduling API will add:
+The remaining v2.0 Scheduling API commands will add:
 - `list-event-types` - List available event types for scheduling
-- `get-event-type-availability` - Get available time slots
 - `schedule-event` - Schedule meetings programmatically
 
 **Requires:** Paid Calendly plan (Standard or higher)

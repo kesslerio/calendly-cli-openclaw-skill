@@ -9,6 +9,7 @@ import { filterInviteesByEmail, getCountPageWindow, getTeamSearchTruncationReaso
 import { normalizeDateRange } from './src/date-range';
 import { normalizeListEventsQuery } from './src/list-events-query';
 import { fetchBatchEventInvitees, normalizeBatchEventInviteesQuery } from './src/batch-event-invitees';
+import { normalizeEventTypeAvailabilityQuery, shapeEventTypeAvailabilityResult } from './src/event-type-availability';
 import {
 	eventInviteeCount,
 	extractInviteePaginationMeta,
@@ -128,6 +129,32 @@ const embeddedSchemas = {
       }
     },
     "required": []
+  },
+  "get_event_type_availability": {
+    "type": "object",
+    "properties": {
+      "event_type": {
+        "type": "string",
+        "description": "URI of the event type to check availability for"
+      },
+      "start_time": {
+        "type": "string",
+        "description": "Start time for availability window (ISO 8601 format)"
+      },
+      "end_time": {
+        "type": "string",
+        "description": "End time for availability window (ISO 8601 format)"
+      },
+      "timezone": {
+        "type": "string",
+        "description": "Optional IANA timezone for slot conversion"
+      }
+    },
+    "required": [
+      "event_type",
+      "start_time",
+      "end_time"
+    ]
   },
   "get_event": {
     "type": "object",
@@ -261,6 +288,12 @@ const generatorTools = [
     "flags": "--email <email> [--min-start-time <min-start-time:iso-8601>] [--max-start-time <max-start-time:iso-8601>] [--status <status:active|canceled>] [--organization-uri <organization-uri>] [--count <count:number>] [--max-membership-pages <max-membership-pages:number>]"
   },
   {
+    "name": "get-event-type-availability",
+    "description": "Get available time slots for a specific event type",
+    "usage": "get-event-type-availability --event-type-uri <event-type-uri> --start-time <start-time:iso-8601> --end-time <end-time:iso-8601> [--timezone <timezone>] [--raw <json>]",
+    "flags": "--event-type-uri <event-type-uri> --start-time <start-time:iso-8601> --end-time <end-time:iso-8601> [--timezone <timezone>] [--raw <json>]"
+  },
+  {
     "name": "get-event",
     "description": "Get details of a specific event",
     "usage": "get-event --event-uuid <event-uuid> [--raw <json>]",
@@ -374,6 +407,7 @@ const commandSignatures: Record<string, string> = {
   "list-events-with-invitees": "function list_events_with_invitees(user_uri?: string, organization_uri?: string, status?: \"active\" | \"canceled\", max_start_time?: string, min_start_time?: string, count?: number, hydrate_invitees?: boolean, max_invitee_fetches?: number);",
   "search-invitees": "function search_invitees(email: string, user_uri?: string, organization_uri?: string, status?: \"active\" | \"canceled\", min_start_time?: string, max_start_time?: string, page_size?: number, max_pages?: number);",
   "search-team": "function search_team(email: string, min_start_time?: string, max_start_time?: string, status?: \"active\" | \"canceled\", organization_uri?: string, count?: number, max_membership_pages?: number);",
+  "get-event-type-availability": "function get_event_type_availability(event_type: string, start_time: string, end_time: string, timezone?: string);",
   "get-event": "function get_event(event_uuid: string);",
   "batch-event-invitees": "function batch_event_invitees(event_uri: string[], status?: \"active\" | \"canceled\", email?: string, count?: number, max_invitee_fetches?: number);",
   "list-event-invitees": "function list_event_invitees(event_uuid: string, status?: \"active\" | \"canceled\", email?: string, count?: number);",
@@ -453,6 +487,31 @@ async function fetchBatchEventInviteesResult(query: Record<string, unknown>, tim
 		normalizedQuery,
 		(eventUuid, pageToken, options) => fetchEventInviteesPage(apiKey, eventUuid, timeout, pageToken, options)
 	);
+}
+
+async function fetchEventTypeAvailabilityResult(query: Record<string, unknown>, timeout: number): Promise<any> {
+	const apiKey = process.env.CALENDLY_API_KEY;
+	if (!apiKey) throw new Error('CALENDLY_API_KEY environment variable is required');
+
+	const params = new URLSearchParams();
+	params.append('event_type', String(query.event_type_uri));
+	params.append('start_time', String(query.start_time));
+	params.append('end_time', String(query.end_time));
+	if (typeof query.timezone === 'string' && query.timezone.length > 0) {
+		params.append('timezone', query.timezone);
+	}
+
+	const response = await axios.get(
+		`https://api.calendly.com/event_type_available_times?${params.toString()}`,
+		{
+			headers: {
+				'Authorization': `Bearer ${apiKey}`,
+				'Content-Type': 'application/json',
+			},
+			timeout,
+		}
+	);
+	return shapeEventTypeAvailabilityResult(response.data, query as any);
 }
 
 async function fetchScheduledEventsWithInvitees(query: Record<string, unknown>, timeout: number): Promise<any> {
@@ -1017,6 +1076,72 @@ program
 		}
 	})
 	.addHelpText('after', () => '\nExample:\n  ' + "./calendly search-team --email person@example.com --organization-uri <ORG_URI> --count 25");
+
+program
+	.command("get-event-type-availability")
+	.summary("get-event-type-availability --event-type-uri <event-type-uri> --start-time <start-time:iso-8601> --end-time <end-time:iso-8601> [--timezone <timezone>] [--raw <json>]")
+	.description("Get available time slots for a specific event type")
+	.usage("--event-type-uri <event-type-uri> --start-time <start-time:iso-8601> --end-time <end-time:iso-8601> [--timezone <timezone>] [--raw <json>]")
+	.option('--raw <json>', 'Provide raw JSON arguments to the tool, bypassing flag parsing.')
+	.option("--event-type-uri <event-type-uri>", "Event type URI to check availability for")
+	.option("--start-time <start-time:iso-8601>", "Start time for availability window (ISO 8601 format)")
+	.option("--end-time <end-time:iso-8601>", "End time for availability window (ISO 8601 format)")
+	.option("--timezone <timezone>", "Optional IANA timezone (example: America/New_York)")
+	.alias("get_event_type_availability")
+	.action(async (cmdOpts) => {
+		const globalOptions = program.opts();
+		const timeout = globalOptions.timeout || 30000;
+		const rawArgs = cmdOpts.raw ? JSON.parse(cmdOpts.raw) : ({} as Record<string, unknown>);
+		const query = normalizeEventTypeAvailabilityQuery(cmdOpts, rawArgs);
+		let mcpResult: unknown;
+		let mcpErrorMessage: string | undefined;
+		try {
+			const runtime = await ensureRuntime();
+			const serverName = embeddedName;
+			const proxy = createServerProxy(runtime, serverName, {
+				initialSchemas: embeddedSchemas,
+			});
+			try {
+				const mcpArgs: Record<string, unknown> = {
+					event_type: query.event_type_uri,
+					start_time: query.start_time,
+					end_time: query.end_time,
+				};
+				if (query.timezone) {
+					mcpArgs.timezone = query.timezone;
+				}
+				const call = (proxy.getEventTypeAvailability as any)(mcpArgs);
+				mcpResult = await invokeWithTimeout(call, timeout);
+				const mcpRaw = createCallResult(mcpResult).raw as Record<string, unknown> | undefined;
+				if (mcpRaw && Array.isArray(mcpRaw.collection)) {
+					printResult(shapeEventTypeAvailabilityResult(mcpRaw, query), globalOptions.output ?? 'text');
+					return;
+				}
+			} catch (error) {
+				mcpErrorMessage = error instanceof Error ? error.message : String(error);
+			} finally {
+				await runtime.close(serverName).catch(() => {});
+			}
+		} catch (error) {
+			mcpErrorMessage = error instanceof Error ? error.message : String(error);
+		}
+		try {
+			const restResult = await fetchEventTypeAvailabilityResult(query, timeout);
+			printResult(restResult, globalOptions.output ?? 'text');
+		} catch (error) {
+			if (mcpResult !== undefined) {
+				printResult(mcpResult, globalOptions.output ?? 'text');
+				return;
+			}
+			let message = error instanceof Error ? error.message : String(error);
+			if (mcpErrorMessage) {
+				message = `${message} (MCP tool fallback failed: ${mcpErrorMessage})`;
+			}
+			console.error(`Error: ${message}`);
+			process.exit(1);
+		}
+	})
+	.addHelpText('after', () => '\nExample:\n  ' + "./calendly get-event-type-availability --event-type-uri https://api.calendly.com/event_types/ET_123 --start-time 2026-03-01T00:00:00Z --end-time 2026-03-02T00:00:00Z --timezone America/New_York");
 
 program
 	.command("get-event")
