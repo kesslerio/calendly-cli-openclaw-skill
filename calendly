@@ -10,6 +10,7 @@ import { normalizeDateRange } from './src/date-range';
 import { normalizeListEventsQuery } from './src/list-events-query';
 import { fetchBatchEventInvitees, normalizeBatchEventInviteesQuery } from './src/batch-event-invitees';
 import { normalizeEventTypeAvailabilityQuery, shapeEventTypeAvailabilityResult } from './src/event-type-availability';
+import { extractEventTypeUuid, normalizeGetEventTypeQuery, shapeGetEventTypeResult } from './src/get-event-type';
 import {
 	normalizeListEventTypesQuery,
 	shapeListEventTypesResult,
@@ -179,6 +180,18 @@ const embeddedSchemas = {
       "end_time"
     ]
   },
+  "get_event_type": {
+    "type": "object",
+    "properties": {
+      "event_type": {
+        "type": "string",
+        "description": "URI of the event type to retrieve"
+      }
+    },
+    "required": [
+      "event_type"
+    ]
+  },
   "get_event": {
     "type": "object",
     "properties": {
@@ -317,6 +330,12 @@ const generatorTools = [
     "flags": "(--user-uri <user-uri> | --organization-uri <organization-uri>) [--count <count:number>] [--raw <json>]"
   },
   {
+    "name": "get-event-type",
+    "description": "Get details of a specific event type",
+    "usage": "get-event-type --event-type-uri <event-type-uri> [--raw <json>]",
+    "flags": "--event-type-uri <event-type-uri> [--raw <json>]"
+  },
+  {
     "name": "get-event-type-availability",
     "description": "Get available time slots for a specific event type",
     "usage": "get-event-type-availability --event-type-uri <event-type-uri> --start-time <start-time:iso-8601> --end-time <end-time:iso-8601> [--timezone <timezone>] [--raw <json>]",
@@ -437,6 +456,7 @@ const commandSignatures: Record<string, string> = {
   "search-invitees": "function search_invitees(email: string, user_uri?: string, organization_uri?: string, status?: \"active\" | \"canceled\", min_start_time?: string, max_start_time?: string, page_size?: number, max_pages?: number);",
   "search-team": "function search_team(email: string, min_start_time?: string, max_start_time?: string, status?: \"active\" | \"canceled\", organization_uri?: string, count?: number, max_membership_pages?: number);",
   "list-event-types": "function list_event_types(user?: string, organization?: string, count?: number);",
+  "get-event-type": "function get_event_type(event_type: string);",
   "get-event-type-availability": "function get_event_type_availability(event_type: string, start_time: string, end_time: string, timezone?: string);",
   "get-event": "function get_event(event_uuid: string);",
   "batch-event-invitees": "function batch_event_invitees(event_uri: string[], status?: \"active\" | \"canceled\", email?: string, count?: number, max_invitee_fetches?: number);",
@@ -542,6 +562,21 @@ async function fetchListEventTypesResult(query: Record<string, unknown>, timeout
 		timeout,
 	});
 	return shapeListEventTypesResult(response.data, query);
+}
+
+async function fetchGetEventTypeResult(query: Record<string, unknown>, timeout: number): Promise<any> {
+	const apiKey = process.env.CALENDLY_API_KEY;
+	if (!apiKey) throw new Error('CALENDLY_API_KEY environment variable is required');
+
+	const eventTypeUuid = extractEventTypeUuid(String(query.event_type_uri));
+	const response = await axios.get(`https://api.calendly.com/event_types/${encodeURIComponent(eventTypeUuid)}`, {
+		headers: {
+			'Authorization': `Bearer ${apiKey}`,
+			'Content-Type': 'application/json',
+		},
+		timeout,
+	});
+	return shapeGetEventTypeResult(response.data, query as any);
 }
 
 async function fetchEventTypeAvailabilityResult(query: Record<string, unknown>, timeout: number): Promise<any> {
@@ -1188,6 +1223,67 @@ program
 		}
 	})
 	.addHelpText('after', () => '\nExample:\n  ' + "./calendly list-event-types --organization-uri https://api.calendly.com/organizations/ORG_123 --count 20");
+
+program
+	.command("get-event-type")
+	.summary("get-event-type --event-type-uri <event-type-uri> [--raw <json>]")
+	.description("Get details of a specific event type")
+	.usage("--event-type-uri <event-type-uri> [--raw <json>]")
+	.option('--raw <json>', 'Provide raw JSON arguments to the tool, bypassing flag parsing.')
+	.option("--event-type-uri <event-type-uri>", "URI of the event type to retrieve")
+	.alias("get_event_type")
+	.action(async (cmdOpts) => {
+		const globalOptions = program.opts();
+		const timeout = globalOptions.timeout || 30000;
+		const rawArgs = cmdOpts.raw ? JSON.parse(cmdOpts.raw) : ({} as Record<string, unknown>);
+		const query = normalizeGetEventTypeQuery(cmdOpts, rawArgs);
+		let mcpResult: unknown;
+		let mcpErrorMessage: string | undefined;
+		try {
+			const runtime = await ensureRuntime();
+			const serverName = embeddedName;
+			const proxy = createServerProxy(runtime, serverName, {
+				initialSchemas: embeddedSchemas,
+			});
+			try {
+				const call = (proxy.getEventType as any)({
+					event_type: query.event_type_uri,
+				});
+				mcpResult = await invokeWithTimeout(call, timeout);
+				const mcpRaw = createCallResult(mcpResult).raw as Record<string, unknown> | undefined;
+				if (mcpRaw) {
+					const shaped = shapeGetEventTypeResult(mcpRaw, query);
+					const found = Boolean((shaped.meta as Record<string, unknown> | undefined)?.found);
+					if (found) {
+						printResult(shaped, globalOptions.output ?? 'text');
+						return;
+					}
+				}
+			} catch (error) {
+				mcpErrorMessage = error instanceof Error ? error.message : String(error);
+			} finally {
+				await runtime.close(serverName).catch(() => {});
+			}
+		} catch (error) {
+			mcpErrorMessage = error instanceof Error ? error.message : String(error);
+		}
+		try {
+			const restResult = await fetchGetEventTypeResult(query, timeout);
+			printResult(restResult, globalOptions.output ?? 'text');
+		} catch (error) {
+			if (mcpResult !== undefined) {
+				printResult(mcpResult, globalOptions.output ?? 'text');
+				return;
+			}
+			let message = error instanceof Error ? error.message : String(error);
+			if (mcpErrorMessage) {
+				message = `${message} (MCP tool fallback failed: ${mcpErrorMessage})`;
+			}
+			console.error(`Error: ${message}`);
+			process.exit(1);
+		}
+	})
+	.addHelpText('after', () => '\nExample:\n  ' + "./calendly get-event-type --event-type-uri https://api.calendly.com/event_types/ET_123");
 
 program
 	.command("get-event-type-availability")
