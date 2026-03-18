@@ -251,8 +251,66 @@ export async function hydrateMissingInvitees(
 	};
 }
 
+export async function hydrateInviteesPerEvent(
+	events: unknown,
+	options: Pick<ListEventsInviteesQuery, 'hydrate_invitees' | 'max_invitee_fetches'>,
+	fetchInviteesPage: InviteesPageFetcher
+): Promise<{ collection: any[]; meta: InviteeHydrationMeta & { max_fetches_per_event: number } }> {
+	const collection = Array.isArray(events) ? events : [];
+	const maxFetchesPerEvent = normalizeMaxInviteeFetches(options.max_invitee_fetches, DEFAULT_MAX_INVITEE_FETCHES);
+	const aggregated: InviteeHydrationMeta & { max_fetches_per_event: number } = {
+		enabled: options.hydrate_invitees !== false,
+		used: false,
+		max_fetches: 0,
+		max_fetches_per_event: maxFetchesPerEvent,
+		fetches_used: 0,
+		events_needing_hydration: 0,
+		events_hydrated: 0,
+		events_failed: 0,
+		events_skipped_missing_uuid: 0,
+		events_skipped_due_to_cap: 0,
+		truncated: false,
+	};
+
+	const hydratedEvents: any[] = [];
+	for (const event of collection) {
+		const hydrated = await hydrateMissingInvitees(
+			[event],
+			options,
+			fetchInviteesPage,
+		);
+		hydratedEvents.push(hydrated.collection[0] ?? event);
+		aggregated.used = aggregated.used || hydrated.meta.used;
+		aggregated.fetches_used += hydrated.meta.fetches_used;
+		aggregated.events_needing_hydration += hydrated.meta.events_needing_hydration;
+		aggregated.events_hydrated += hydrated.meta.events_hydrated;
+		aggregated.events_failed += hydrated.meta.events_failed;
+		aggregated.events_skipped_missing_uuid += hydrated.meta.events_skipped_missing_uuid;
+		aggregated.events_skipped_due_to_cap += hydrated.meta.events_skipped_due_to_cap;
+		aggregated.truncated = aggregated.truncated || hydrated.meta.truncated;
+	}
+
+	aggregated.max_fetches = aggregated.events_needing_hydration * maxFetchesPerEvent;
+	if (aggregated.truncated) {
+		aggregated.truncation_reason = 'max_invitee_fetches_reached';
+	}
+
+	return {
+		collection: hydratedEvents,
+		meta: aggregated,
+	};
+}
+
 export function eventInviteeCount(event: any): number {
 	const embeddedInvitees = normalizeInvitees(event?.invitees);
+	const hydration = event?.invitee_hydration;
+	const hydrationPartial = hydration?.used === true && (hydration?.truncated === true || hydration?.reason === 'invitee_fetch_failed');
+	if (hydrationPartial) {
+		if (event?.status === 'active') {
+			return eventActiveInviteeCounter(event);
+		}
+		return eventTotalInviteeCounter(event);
+	}
 	if (embeddedInvitees.length > 0) {
 		return embeddedInvitees.length;
 	}

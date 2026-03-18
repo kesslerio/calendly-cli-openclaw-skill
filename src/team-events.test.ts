@@ -191,7 +191,7 @@ describe('scanTeamEvents', () => {
 		expect(result.collection[0].member.user_name).toBe('Former or unknown member');
 	});
 
-	test('skips the org-wide supplement when membership scanning is truncated', async () => {
+	test('keeps the org-wide supplement when membership scanning is truncated, with a conservative attribution label', async () => {
 		let membershipCalls = 0;
 		let orgEventCalls = 0;
 		const result = await scanTeamEvents(
@@ -217,14 +217,26 @@ describe('scanTeamEvents', () => {
 				fetchMemberEventsPage: async () => ({ collection: [] }),
 				fetchOrganizationEventsPage: async () => {
 					orgEventCalls += 1;
-					return { collection: [] };
+					return {
+						collection: [
+							{
+								uri: 'https://api.calendly.com/scheduled_events/E-recovered',
+								name: 'Recovered Org Event',
+								start_time: '2026-03-03T15:00:00Z',
+								status: 'active',
+								invitees_counter: { active: 1, total: 1 },
+							},
+						],
+					};
 				},
 				fetchEventInviteesPage: async () => ({ collection: [] }),
 			}
 		);
 
 		expect(membershipCalls).toBe(1);
-		expect(orgEventCalls).toBe(0);
+		expect(orgEventCalls).toBe(1);
+		expect(result.collection.some((record) => record.event.name === 'Recovered Org Event')).toBe(true);
+		expect(result.collection.find((record) => record.event.name === 'Recovered Org Event')?.member.user_name).toBe('Unscanned, former, or unknown member');
 		expect(result.meta.truncation_reason).toBe('membership_page_limit');
 	});
 

@@ -208,10 +208,10 @@ function createMembersDisplayLabel(members: TeamMemberContext[]): string {
 	return labels.join(', ');
 }
 
-function createUnattributedMemberContext(organizationUri: string): TeamMemberContext {
+function createUnattributedMemberContext(organizationUri: string, userName: string = 'Former or unknown member'): TeamMemberContext {
 	return {
 		organization_uri: organizationUri,
-		user_name: 'Former or unknown member',
+		user_name: userName,
 	};
 }
 
@@ -415,8 +415,11 @@ export async function scanTeamEvents(
 		}
 	}
 
-	if (!membershipPageLimitReached && !query.member_email && !query.member_uri && fetchers.fetchOrganizationEventsPage) {
-		const unattributedMember = createUnattributedMemberContext(query.organization_uri);
+	if (!query.member_email && !query.member_uri && fetchers.fetchOrganizationEventsPage) {
+		const unattributedMember = createUnattributedMemberContext(
+			query.organization_uri,
+			membershipPageLimitReached ? 'Unscanned, former, or unknown member' : 'Former or unknown member'
+		);
 		let pageToken: string | undefined;
 		let orgPages = 0;
 		let orgEventsScanned = 0;

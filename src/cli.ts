@@ -35,6 +35,7 @@ import {
 import {
 	eventInviteeCount,
 	extractInviteePaginationMeta,
+	hydrateInviteesPerEvent,
 	hydrateMissingInvitees,
 	normalizeInvitees,
 	shouldIncludeInvitees,
@@ -956,7 +957,7 @@ async function fetchScheduledEventsWithInvitees(query: Record<string, unknown>, 
 	);
 
 	const events = Array.isArray(response.data?.collection) ? response.data.collection : [];
-	const hydrated = await hydrateMissingInvitees(
+	const hydrated = await hydrateInviteesPerEvent(
 		events,
 		{
 			hydrate_invitees: query.hydrate_invitees as boolean | undefined,
