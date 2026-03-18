@@ -51,6 +51,7 @@ export type TeamEventInviteesPage = {
 export type TeamEventFetchers = {
 	fetchMembershipPage: (pageToken?: string) => Promise<TeamMembershipPage>;
 	fetchMemberEventsPage: (memberUserUri: string, pageToken?: string, includeInvitees?: boolean, pageSize?: number) => Promise<TeamEventsPage>;
+	fetchOrganizationEventsPage?: (pageToken?: string, includeInvitees?: boolean, pageSize?: number) => Promise<TeamEventsPage>;
 	fetchEventInviteesPage: (eventUuid: string, pageToken?: string) => Promise<TeamEventInviteesPage>;
 };
 
@@ -152,7 +153,6 @@ function matchesEventTypeName(event: any, eventTypeName?: string): boolean {
 		event?.event_type_name,
 		event?.event_type?.name,
 		event?.event_type?.slug,
-		event?.event_type?.uri,
 	];
 	return candidates.some((candidate) => typeof candidate === 'string' && candidate.toLowerCase().includes(needle));
 }
@@ -206,6 +206,13 @@ function createMemberDisplayLabel(member: TeamMemberContext): string {
 function createMembersDisplayLabel(members: TeamMemberContext[]): string {
 	const labels = members.map(createMemberDisplayLabel);
 	return labels.join(', ');
+}
+
+function createUnattributedMemberContext(organizationUri: string): TeamMemberContext {
+	return {
+		organization_uri: organizationUri,
+		user_name: 'Former or unknown member',
+	};
 }
 
 function toRecordCollection(value: unknown): any[] {
@@ -404,6 +411,48 @@ export async function scanTeamEvents(
 		}
 
 		if (Boolean(pageToken) && memberPages >= maxPages) {
+			memberEventPageLimitReached = true;
+		}
+	}
+
+	if (!membershipPageLimitReached && !query.member_email && !query.member_uri && fetchers.fetchOrganizationEventsPage) {
+		const unattributedMember = createUnattributedMemberContext(query.organization_uri);
+		let pageToken: string | undefined;
+		let orgPages = 0;
+		let orgEventsScanned = 0;
+		const orgEventScanLimit = pageSize * maxPages;
+
+		while (orgPages < maxPages && orgEventsScanned < orgEventScanLimit) {
+			const page = await fetchers.fetchOrganizationEventsPage(pageToken, query.include_invitees === true, pageSize);
+			const events = toRecordCollection(page?.collection);
+			orgPages += 1;
+			eventPagesScanned += 1;
+			orgEventsScanned += events.length;
+			eventsScanned += events.length;
+
+			for (const event of events) {
+				if (!matchesEventTypeName(event, query.event_type_name)) {
+					continue;
+				}
+				const dedupKey = getTeamEventDedupKey(event);
+				if (dedupKey && seenEventKeys.has(dedupKey)) {
+					continue;
+				}
+				if (dedupKey) {
+					seenEventKeys.add(dedupKey);
+					seenEventIndexByKey.set(dedupKey, collected.length);
+				}
+				collected.push({ member: unattributedMember, members: [unattributedMember], event, scanIndex: nextScanIndex });
+				nextScanIndex += 1;
+			}
+
+			pageToken = page?.next_page_token;
+			if (!pageToken) {
+				break;
+			}
+		}
+
+		if (Boolean(pageToken) && orgPages >= maxPages) {
 			memberEventPageLimitReached = true;
 		}
 	}

@@ -108,7 +108,7 @@ describe('scanTeamEvents', () => {
 		expect(result.meta.invitee_hydration).toBeDefined();
 	});
 
-	test('uses invitees_counter.total when invitees are not embedded', async () => {
+	test('uses active invitee counts for active events and total counts for canceled events when invitees are not embedded', async () => {
 		const result = await scanTeamEvents(
 			{
 				organization_uri: 'https://api.calendly.com/organizations/O1',
@@ -132,9 +132,16 @@ describe('scanTeamEvents', () => {
 				fetchMemberEventsPage: async () => ({
 					collection: [
 						{
+							uri: 'https://api.calendly.com/scheduled_events/E-active',
+							name: 'Active Demo Call',
+							start_time: '2026-03-01T15:00:00Z',
+							status: 'active',
+							invitees_counter: { total: 4, active: 1 },
+						},
+						{
 							uri: 'https://api.calendly.com/scheduled_events/E1',
 							name: 'Demo Call',
-							start_time: '2026-03-01T15:00:00Z',
+							start_time: '2026-03-02T15:00:00Z',
 							status: 'canceled',
 							invitees_counter: { total: 4, active: 0 },
 						},
@@ -144,8 +151,81 @@ describe('scanTeamEvents', () => {
 			}
 		);
 
+		expect(result.collection).toHaveLength(2);
+		expect(result.collection[0].invitee_count).toBe(1);
+		expect(result.collection[1].invitee_count).toBe(4);
+	});
+
+	test('supplements current memberships with organization events so former-member history is still returned', async () => {
+		let orgEventCalls = 0;
+		const result = await scanTeamEvents(
+			{
+				organization_uri: 'https://api.calendly.com/organizations/O1',
+				count: 20,
+				max_membership_pages: 1,
+			},
+			{
+				fetchMembershipPage: async () => ({ collection: [] }),
+				fetchMemberEventsPage: async () => ({ collection: [] }),
+				fetchOrganizationEventsPage: async () => {
+					orgEventCalls += 1;
+					return {
+						collection: [
+							{
+								uri: 'https://api.calendly.com/scheduled_events/E-former',
+								name: 'Former Member Demo',
+								start_time: '2026-02-01T15:00:00Z',
+								status: 'active',
+								invitees_counter: { active: 1, total: 1 },
+							},
+						],
+					};
+				},
+				fetchEventInviteesPage: async () => ({ collection: [] }),
+			}
+		);
+
+		expect(orgEventCalls).toBe(1);
 		expect(result.collection).toHaveLength(1);
-		expect(result.collection[0].invitee_count).toBe(4);
+		expect(result.collection[0].event.name).toBe('Former Member Demo');
+		expect(result.collection[0].member.user_name).toBe('Former or unknown member');
+	});
+
+	test('skips the org-wide supplement when membership scanning is truncated', async () => {
+		let membershipCalls = 0;
+		let orgEventCalls = 0;
+		const result = await scanTeamEvents(
+			{
+				organization_uri: 'https://api.calendly.com/organizations/O1',
+				count: 20,
+				max_membership_pages: 1,
+			},
+			{
+				fetchMembershipPage: async () => {
+					membershipCalls += 1;
+					return {
+						collection: [
+							{
+								uri: 'https://api.calendly.com/organization_memberships/M1',
+								user: { uri: 'https://api.calendly.com/users/U1', email: 'a@example.com', name: 'Member A' },
+								organization: 'https://api.calendly.com/organizations/O1',
+							},
+						],
+						next_page_token: 'page-2',
+					};
+				},
+				fetchMemberEventsPage: async () => ({ collection: [] }),
+				fetchOrganizationEventsPage: async () => {
+					orgEventCalls += 1;
+					return { collection: [] };
+				},
+				fetchEventInviteesPage: async () => ({ collection: [] }),
+			}
+		);
+
+		expect(membershipCalls).toBe(1);
+		expect(orgEventCalls).toBe(0);
+		expect(result.meta.truncation_reason).toBe('membership_page_limit');
 	});
 
 	test('de-duplicates shared events returned from multiple member calendars', async () => {
@@ -248,6 +328,46 @@ describe('scanTeamEvents', () => {
 		expect(result.collection[0].member.user_email).toBe('b@example.com');
 		expect(result.collection[0].event.name).toBe('Demo Review');
 		expect(result.meta.events_returned).toBe(1);
+	});
+
+	test('does not match event_type_name against event_type uri alone', async () => {
+		const result = await scanTeamEvents(
+			{
+				organization_uri: 'https://api.calendly.com/organizations/O1',
+				count: 20,
+				max_membership_pages: 10,
+				event_type_name: 'sales',
+			},
+			{
+				fetchMembershipPage: async () => ({
+					collection: [
+						{
+							uri: 'https://api.calendly.com/organization_memberships/M1',
+							user: { uri: 'https://api.calendly.com/users/U1', email: 'a@example.com', name: 'Member A' },
+							organization: 'https://api.calendly.com/organizations/O1',
+						},
+					],
+				}),
+				fetchMemberEventsPage: async () => ({
+					collection: [
+						{
+							uri: 'https://api.calendly.com/scheduled_events/E1',
+							name: 'Customer Check-in',
+							start_time: '2026-03-01T15:00:00Z',
+							status: 'active',
+							event_type: {
+								name: 'Customer Success Review',
+								slug: 'customer-success-review',
+								uri: 'https://api.calendly.com/event_types/sales-demo',
+							},
+						},
+					],
+				}),
+				fetchEventInviteesPage: async () => ({ collection: [] }),
+			}
+		);
+
+		expect(result.collection).toHaveLength(0);
 	});
 
 	test('keeps upstream-prefiltered memberships when member_email is set but user_email is omitted', async () => {

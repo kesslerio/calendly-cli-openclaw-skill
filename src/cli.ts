@@ -1561,6 +1561,28 @@ program
 						next_page_token: response.data?.pagination?.next_page_token,
 					};
 				},
+				fetchOrganizationEventsPage: async (pageToken?: string, includeInvitees?: boolean, pageSize?: number) => {
+					const params = new URLSearchParams();
+					params.append('count', String(pageSize ?? 100));
+					params.append('sort', 'start_time:asc');
+					params.append('organization', query.organization_uri);
+					if (query.status) params.append('status', query.status);
+					if (query.min_start_time) params.append('min_start_time', query.min_start_time);
+					if (query.max_start_time) params.append('max_start_time', query.max_start_time);
+					if (includeInvitees) params.append('expand', 'invitees');
+					if (pageToken) params.append('page_token', pageToken);
+					const response = await axios.get(`https://api.calendly.com/scheduled_events?${params.toString()}`, {
+						headers: {
+							'Authorization': `Bearer ${apiKey}`,
+							'Content-Type': 'application/json',
+						},
+						timeout,
+					});
+					return {
+						collection: Array.isArray(response.data?.collection) ? response.data.collection : [],
+						next_page_token: response.data?.pagination?.next_page_token,
+					};
+				},
 				fetchEventInviteesPage: async (eventUuid: string, pageToken?: string) => {
 					const params = new URLSearchParams();
 					params.append('count', '100');

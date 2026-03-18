@@ -256,6 +256,9 @@ export function eventInviteeCount(event: any): number {
 	if (embeddedInvitees.length > 0) {
 		return embeddedInvitees.length;
 	}
+	if (event?.status === 'active') {
+		return eventActiveInviteeCounter(event);
+	}
 	return eventTotalInviteeCounter(event);
 }
 
