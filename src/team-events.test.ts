@@ -22,6 +22,18 @@ describe('normalizeTeamEventsQuery', () => {
 		expect(query.member_email).toBe('person@example.com');
 		expect(query.event_type_name).toBe('demo');
 	});
+
+	test('accepts camelCase raw maxMembershipPages input', () => {
+		const query = normalizeTeamEventsQuery(
+			{},
+			{
+				organization_uri: 'https://api.calendly.com/organizations/O1',
+				maxMembershipPages: 3,
+			}
+		);
+
+		expect(query.max_membership_pages).toBe(3);
+	});
 });
 
 describe('scanTeamEvents', () => {
@@ -96,6 +108,90 @@ describe('scanTeamEvents', () => {
 		expect(result.meta.invitee_hydration).toBeDefined();
 	});
 
+	test('uses invitees_counter.total when invitees are not embedded', async () => {
+		const result = await scanTeamEvents(
+			{
+				organization_uri: 'https://api.calendly.com/organizations/O1',
+				count: 20,
+				max_membership_pages: 10,
+			},
+			{
+				fetchMembershipPage: async () => ({
+					collection: [
+						{
+							uri: 'https://api.calendly.com/organization_memberships/M1',
+							user: {
+								uri: 'https://api.calendly.com/users/U1',
+								email: 'a@example.com',
+								name: 'Member A',
+							},
+							organization: 'https://api.calendly.com/organizations/O1',
+						},
+					],
+				}),
+				fetchMemberEventsPage: async () => ({
+					collection: [
+						{
+							uri: 'https://api.calendly.com/scheduled_events/E1',
+							name: 'Demo Call',
+							start_time: '2026-03-01T15:00:00Z',
+							status: 'canceled',
+							invitees_counter: { total: 4, active: 0 },
+						},
+					],
+				}),
+				fetchEventInviteesPage: async () => ({ collection: [] }),
+			}
+		);
+
+		expect(result.collection).toHaveLength(1);
+		expect(result.collection[0].invitee_count).toBe(4);
+	});
+
+	test('de-duplicates shared events returned from multiple member calendars', async () => {
+		const result = await scanTeamEvents(
+			{
+				organization_uri: 'https://api.calendly.com/organizations/O1',
+				count: 20,
+				max_membership_pages: 10,
+			},
+			{
+				fetchMembershipPage: async () => ({
+					collection: [
+						{
+							uri: 'https://api.calendly.com/organization_memberships/M1',
+							user: { uri: 'https://api.calendly.com/users/U1', email: 'a@example.com', name: 'Member A' },
+							organization: 'https://api.calendly.com/organizations/O1',
+						},
+						{
+							uri: 'https://api.calendly.com/organization_memberships/M2',
+							user: { uri: 'https://api.calendly.com/users/U2', email: 'b@example.com', name: 'Member B' },
+							organization: 'https://api.calendly.com/organizations/O1',
+						},
+					],
+				}),
+				fetchMemberEventsPage: async (memberUserUri) => ({
+					collection: [
+						{
+							uri: 'https://api.calendly.com/scheduled_events/E-shared',
+							uuid: 'E-shared',
+							name: `Shared Demo for ${memberUserUri}`,
+							start_time: '2026-03-01T15:00:00Z',
+							status: 'active',
+						},
+					],
+				}),
+				fetchEventInviteesPage: async () => ({ collection: [] }),
+			}
+		);
+
+		expect(result.collection).toHaveLength(1);
+		expect(result.meta.events_returned).toBe(1);
+		expect(result.collection[0].member.user_email).toBe('a@example.com');
+		expect(result.collection[0].members.map((member) => member.user_email)).toEqual(['a@example.com', 'b@example.com']);
+		expect(result.collection[0].event.uuid).toBe('E-shared');
+	});
+
 	test('filters by member email and event type name', async () => {
 		let eventCalls = 0;
 
@@ -152,5 +248,231 @@ describe('scanTeamEvents', () => {
 		expect(result.collection[0].member.user_email).toBe('b@example.com');
 		expect(result.collection[0].event.name).toBe('Demo Review');
 		expect(result.meta.events_returned).toBe(1);
+	});
+
+	test('keeps upstream-prefiltered memberships when member_email is set but user_email is omitted', async () => {
+		let eventCalls = 0;
+		const result = await scanTeamEvents(
+			{
+				organization_uri: 'https://api.calendly.com/organizations/O1',
+				count: 20,
+				max_membership_pages: 10,
+				member_email: 'prefiltered@example.com',
+			},
+			{
+				fetchMembershipPage: async () => ({
+					collection: [
+						{
+							uri: 'https://api.calendly.com/organization_memberships/M1',
+							user: 'https://api.calendly.com/users/U1',
+							organization: 'https://api.calendly.com/organizations/O1',
+						},
+					],
+				}),
+				fetchMemberEventsPage: async () => {
+					eventCalls += 1;
+					return {
+						collection: [
+							{
+								uri: 'https://api.calendly.com/scheduled_events/E-prefiltered',
+								name: 'Prefiltered Demo',
+								start_time: '2026-03-01T15:00:00Z',
+								status: 'active',
+							},
+						],
+					};
+				},
+				fetchEventInviteesPage: async () => ({ collection: [] }),
+			}
+		);
+
+		expect(eventCalls).toBe(1);
+		expect(result.collection).toHaveLength(1);
+		expect(result.collection[0].event.name).toBe('Prefiltered Demo');
+	});
+
+	test('forwards computed page size so later sparse-match pages are still scanned', async () => {
+		const pageSizes: number[] = [];
+		const pageTokens: Array<string | undefined> = [];
+
+		const result = await scanTeamEvents(
+			{
+				organization_uri: 'https://api.calendly.com/organizations/O1',
+				count: 1,
+				max_membership_pages: 10,
+				event_type_name: 'demo',
+			},
+			{
+				fetchMembershipPage: async () => ({
+					collection: [
+						{
+							uri: 'https://api.calendly.com/organization_memberships/M1',
+							user: {
+								uri: 'https://api.calendly.com/users/U1',
+								email: 'a@example.com',
+								name: 'Member A',
+							},
+							organization: 'https://api.calendly.com/organizations/O1',
+						},
+					],
+				}),
+				fetchMemberEventsPage: async (_memberUserUri, pageToken, _includeInvitees, pageSize) => {
+					pageSizes.push(pageSize ?? -1);
+					pageTokens.push(pageToken);
+					if (!pageToken) {
+						return {
+							collection: [
+								{
+									uri: 'https://api.calendly.com/scheduled_events/E1',
+									name: 'Internal Sync',
+									start_time: '2026-03-01T15:00:00Z',
+									status: 'active',
+								},
+							],
+							next_page_token: 'page-2',
+						};
+					}
+					return {
+						collection: [
+							{
+								uri: 'https://api.calendly.com/scheduled_events/E2',
+								name: 'Demo Review',
+								start_time: '2026-03-02T15:00:00Z',
+								status: 'active',
+							},
+						],
+					};
+				},
+				fetchEventInviteesPage: async () => ({ collection: [] }),
+			}
+		);
+
+		expect(pageSizes).toEqual([20, 20]);
+		expect(pageTokens).toEqual([undefined, 'page-2']);
+		expect(result.collection).toHaveLength(1);
+		expect(result.collection[0].event.name).toBe('Demo Review');
+		expect(result.meta.event_pages_scanned).toBe(2);
+	});
+
+	test('applies count after global chronological ordering across members', async () => {
+		const result = await scanTeamEvents(
+			{
+				organization_uri: 'https://api.calendly.com/organizations/O1',
+				count: 2,
+				max_membership_pages: 10,
+			},
+			{
+				fetchMembershipPage: async () => ({
+					collection: [
+						{
+							uri: 'https://api.calendly.com/organization_memberships/M1',
+							user: { uri: 'https://api.calendly.com/users/U1', email: 'a@example.com', name: 'Member A' },
+							organization: 'https://api.calendly.com/organizations/O1',
+						},
+						{
+							uri: 'https://api.calendly.com/organization_memberships/M2',
+							user: { uri: 'https://api.calendly.com/users/U2', email: 'b@example.com', name: 'Member B' },
+							organization: 'https://api.calendly.com/organizations/O1',
+						},
+					],
+				}),
+				fetchMemberEventsPage: async (memberUserUri) => {
+					if (memberUserUri === 'https://api.calendly.com/users/U1') {
+						return {
+							collection: [
+								{
+									uri: 'https://api.calendly.com/scheduled_events/E1',
+									name: 'Older A',
+									start_time: '2026-03-03T15:00:00Z',
+									status: 'active',
+								},
+								{
+									uri: 'https://api.calendly.com/scheduled_events/E2',
+									name: 'Newest A',
+									start_time: '2026-03-05T15:00:00Z',
+									status: 'active',
+								},
+							],
+						};
+					}
+					return {
+						collection: [
+							{
+								uri: 'https://api.calendly.com/scheduled_events/E3',
+								name: 'Middle B',
+								start_time: '2026-03-04T15:00:00Z',
+								status: 'active',
+							},
+						],
+					};
+				},
+				fetchEventInviteesPage: async () => ({ collection: [] }),
+			}
+		);
+
+		expect(result.collection).toHaveLength(2);
+		expect(result.collection.map((record) => record.event.name)).toEqual(['Older A', 'Middle B']);
+		expect(result.meta.has_more).toBe(true);
+		expect(result.meta.truncation_reason).toBe('result_cap');
+	});
+
+	test('treats max_invitee_fetches as a per-event cap during team hydration', async () => {
+		let inviteeCalls = 0;
+		const result = await scanTeamEvents(
+			{
+				organization_uri: 'https://api.calendly.com/organizations/O1',
+				count: 20,
+				max_membership_pages: 10,
+				include_invitees: true,
+				hydrate_invitees: true,
+				max_invitee_fetches: 1,
+			},
+			{
+				fetchMembershipPage: async () => ({
+					collection: [
+						{
+							uri: 'https://api.calendly.com/organization_memberships/M1',
+							user: { uri: 'https://api.calendly.com/users/U1', email: 'a@example.com', name: 'Member A' },
+							organization: 'https://api.calendly.com/organizations/O1',
+						},
+					],
+				}),
+				fetchMemberEventsPage: async () => ({
+					collection: [
+						{
+							uri: 'https://api.calendly.com/scheduled_events/E1',
+							name: 'Demo One',
+							start_time: '2026-03-01T15:00:00Z',
+							status: 'active',
+							invitees_counter: { total: 1, active: 1 },
+							invitees: [],
+						},
+						{
+							uri: 'https://api.calendly.com/scheduled_events/E2',
+							name: 'Demo Two',
+							start_time: '2026-03-02T15:00:00Z',
+							status: 'active',
+							invitees_counter: { total: 1, active: 1 },
+							invitees: [],
+						},
+					],
+				}),
+				fetchEventInviteesPage: async (eventUuid) => {
+					inviteeCalls += 1;
+					return { collection: [{ email: `${eventUuid.toLowerCase()}@example.com` }] };
+				},
+			}
+		);
+
+		expect(inviteeCalls).toBe(2);
+		expect(result.collection).toHaveLength(2);
+		expect(result.collection[0].invitees).toEqual([{ email: 'e1@example.com' }]);
+		expect(result.collection[1].invitees).toEqual([{ email: 'e2@example.com' }]);
+		expect(result.meta.invitee_hydration).toMatchObject({
+			fetches_used: 2,
+			max_fetches: 2,
+			max_fetches_per_event: 1,
+			events_hydrated: 2,
+		});
 	});
 });

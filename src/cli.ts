@@ -460,6 +460,12 @@ const generatorTools = [
     "flags": "[--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--max-start-time <max-start-time:iso-8601>] [--min-start-time <min-start-time:iso-8601>] [--count <count:number>] [--hydrate-invitees <hydrate-invitees:boolean>] [--max-invitee-fetches <max-invitee-fetches:number>] [--raw <json>]"
   },
   {
+    "name": "list-team-events",
+    "description": "List team scheduled events by scanning organization memberships and member calendars",
+    "usage": "list-team-events --organization-uri <organization-uri> [--status <status:active|canceled>] [--min-start-time <min-start-time:iso-8601>] [--max-start-time <max-start-time:iso-8601>] [--count <count:number>] [--max-membership-pages <max-membership-pages:number>] [--member-email <member-email>] [--member-uri <member-uri>] [--event-type-name <event-type-name>] [--include-invitees] [--hydrate-invitees <hydrate-invitees:boolean>] [--max-invitee-fetches <max-invitee-fetches:number>] [--raw <json>]",
+    "flags": "--organization-uri <organization-uri> [--status <status:active|canceled>] [--min-start-time <min-start-time:iso-8601>] [--max-start-time <max-start-time:iso-8601>] [--count <count:number>] [--max-membership-pages <max-membership-pages:number>] [--member-email <member-email>] [--member-uri <member-uri>] [--event-type-name <event-type-name>] [--include-invitees] [--hydrate-invitees <hydrate-invitees:boolean>] [--max-invitee-fetches <max-invitee-fetches:number>] [--raw <json>]"
+  },
+  {
     "name": "search-invitees",
     "description": "Search invitees by email across paginated organization events",
     "usage": "search-invitees --email <email> [--user-uri <user-uri>] [--organization-uri <organization-uri>] [--status <status:active|canceled>] [--min-start-time <min-start-time:iso-8601>] [--max-start-time <max-start-time:iso-8601>] [--page-size <page-size:number>] [--max-pages <max-pages:number>]",
@@ -1517,6 +1523,8 @@ program
 					const params = new URLSearchParams();
 					params.append('count', '100');
 					params.append('organization', query.organization_uri);
+					if (query.member_email) params.append('email', query.member_email);
+					if (query.member_uri) params.append('user', query.member_uri);
 					if (pageToken) params.append('page_token', pageToken);
 					const response = await axios.get(`https://api.calendly.com/organization_memberships?${params.toString()}`, {
 						headers: {
@@ -1530,9 +1538,10 @@ program
 						next_page_token: response.data?.pagination?.next_page_token,
 					};
 				},
-				fetchMemberEventsPage: async (memberUserUri: string, pageToken?: string, includeInvitees?: boolean) => {
+				fetchMemberEventsPage: async (memberUserUri: string, pageToken?: string, includeInvitees?: boolean, pageSize?: number) => {
 					const params = new URLSearchParams();
-					params.append('count', '100');
+					params.append('count', String(pageSize ?? 100));
+					params.append('sort', 'start_time:asc');
 					params.append('user', memberUserUri);
 					params.append('organization', query.organization_uri);
 					if (query.status) params.append('status', query.status);

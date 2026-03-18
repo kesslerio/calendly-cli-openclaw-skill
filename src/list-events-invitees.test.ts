@@ -61,6 +61,12 @@ describe('normalizeInvitees and eventInviteeCount', () => {
 		expect(eventInviteeCount({ invitees })).toBe(2);
 	});
 
+	test('falls back to invitees_counter.total when invitees are not expanded', () => {
+		expect(eventInviteeCount({ invitees: undefined, invitees_counter: { total: 3, active: 2 } })).toBe(3);
+		expect(eventInviteeCount({ invitees: [], invitees_counter: { total: '2', active: '1' } })).toBe(2);
+		expect(eventInviteeCount({ invitees: [], status: 'canceled', invitees_counter: { total: 4, active: 0 } })).toBe(4);
+	});
+
 	test('returns empty array/count for empty and non-array cases', () => {
 		expect(normalizeInvitees(undefined)).toEqual([]);
 		expect(normalizeInvitees({})).toEqual([]);
@@ -95,6 +101,10 @@ describe('shouldHydrateEventInvitees', () => {
 			invitees_counter: { active: 2 },
 			invitees: [{ email: 'embedded@example.com' }],
 		})).toBe(false);
+	});
+
+	test('hydrates canceled events when total invitees are positive even if active is zero', () => {
+		expect(shouldHydrateEventInvitees({ invitees_counter: { total: 2, active: 0 }, invitees: [] })).toBe(true);
 	});
 });
 

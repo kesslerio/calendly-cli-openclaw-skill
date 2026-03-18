@@ -1,6 +1,6 @@
 import { normalizeDateRange } from './date-range';
 import { getCountPageWindow, getTeamSearchTruncationReason, toMembershipUserUri, toTeamMemberContext, type TeamMemberContext } from './search-team-helpers';
-import { eventInviteeCount, hydrateMissingInvitees, normalizeInvitees } from './list-events-invitees';
+import { eventInviteeCount, getEventUuid, hydrateMissingInvitees, normalizeInvitees, type InviteeHydrationMeta } from './list-events-invitees';
 
 export type TeamEventsCmdOptions = {
 	raw?: string;
@@ -50,12 +50,13 @@ export type TeamEventInviteesPage = {
 
 export type TeamEventFetchers = {
 	fetchMembershipPage: (pageToken?: string) => Promise<TeamMembershipPage>;
-	fetchMemberEventsPage: (memberUserUri: string, pageToken?: string, includeInvitees?: boolean) => Promise<TeamEventsPage>;
+	fetchMemberEventsPage: (memberUserUri: string, pageToken?: string, includeInvitees?: boolean, pageSize?: number) => Promise<TeamEventsPage>;
 	fetchEventInviteesPage: (eventUuid: string, pageToken?: string) => Promise<TeamEventInviteesPage>;
 };
 
 export type TeamEventRecord = {
 	member: TeamMemberContext;
+	members: TeamMemberContext[];
 	event: any;
 	invitees: ReturnType<typeof normalizeInvitees>;
 	invitee_count: number;
@@ -162,17 +163,102 @@ function matchesMemberScope(member: TeamMemberContext, query: TeamEventsQuery): 
 			return false;
 		}
 	}
-	if (query.member_email && typeof member.user_email !== 'string') {
-		return false;
-	}
 	if (query.member_uri && member.user_uri !== query.member_uri) {
 		return false;
 	}
 	return true;
 }
 
+function getTeamEventDedupKey(event: any): string | undefined {
+	const eventUuid = getEventUuid(event);
+	if (eventUuid) {
+		return `uuid:${eventUuid}`;
+	}
+	if (typeof event?.uri === 'string' && event.uri.length > 0) {
+		return `uri:${event.uri}`;
+	}
+	return undefined;
+}
+
+function toEventTimeSortKey(event: any): number {
+	const raw = event?.start_time;
+	if (typeof raw !== 'string' || raw.length === 0) {
+		return Number.POSITIVE_INFINITY;
+	}
+	const parsed = Date.parse(raw);
+	return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
+}
+
+function sameMember(left: TeamMemberContext, right: TeamMemberContext): boolean {
+	if (left.user_uri && right.user_uri) {
+		return left.user_uri === right.user_uri;
+	}
+	if (left.user_email && right.user_email) {
+		return left.user_email.toLowerCase() === right.user_email.toLowerCase();
+	}
+	return false;
+}
+
+function createMemberDisplayLabel(member: TeamMemberContext): string {
+	return member.user_name ?? member.user_email ?? member.user_uri ?? 'Unknown member';
+}
+
+function createMembersDisplayLabel(members: TeamMemberContext[]): string {
+	const labels = members.map(createMemberDisplayLabel);
+	return labels.join(', ');
+}
+
 function toRecordCollection(value: unknown): any[] {
 	return Array.isArray(value) ? value.filter((entry) => Boolean(entry) && typeof entry === 'object') as any[] : [];
+}
+
+async function hydrateTeamEventInvitees(
+	events: any[],
+	maxInviteeFetches: number | undefined,
+	fetchInviteesPage: TeamEventFetchers['fetchEventInviteesPage'],
+): Promise<{ collection: any[]; meta: InviteeHydrationMeta & { max_fetches_per_event: number } }> {
+	const maxFetchesPerEvent = maxInviteeFetches ?? 25;
+	const aggregated: InviteeHydrationMeta & { max_fetches_per_event: number } = {
+		enabled: true,
+		used: false,
+		max_fetches: 0,
+		max_fetches_per_event: maxFetchesPerEvent,
+		fetches_used: 0,
+		events_needing_hydration: 0,
+		events_hydrated: 0,
+		events_failed: 0,
+		events_skipped_missing_uuid: 0,
+		events_skipped_due_to_cap: 0,
+		truncated: false,
+	};
+
+	const collection: any[] = [];
+	for (const event of events) {
+		const hydrated = await hydrateMissingInvitees(
+			[event],
+			{
+				hydrate_invitees: true,
+				max_invitee_fetches: maxInviteeFetches,
+			},
+			fetchInviteesPage,
+		);
+		collection.push(hydrated.collection[0] ?? event);
+		aggregated.used = aggregated.used || hydrated.meta.used;
+		aggregated.fetches_used += hydrated.meta.fetches_used;
+		aggregated.events_needing_hydration += hydrated.meta.events_needing_hydration;
+		aggregated.events_hydrated += hydrated.meta.events_hydrated;
+		aggregated.events_failed += hydrated.meta.events_failed;
+		aggregated.events_skipped_missing_uuid += hydrated.meta.events_skipped_missing_uuid;
+		aggregated.events_skipped_due_to_cap += hydrated.meta.events_skipped_due_to_cap;
+		aggregated.truncated = aggregated.truncated || hydrated.meta.truncated;
+	}
+
+	if (aggregated.truncated) {
+		aggregated.truncation_reason = 'max_invitee_fetches_reached';
+	}
+	aggregated.max_fetches = aggregated.events_needing_hydration * maxFetchesPerEvent;
+
+	return { collection, meta: aggregated };
 }
 
 export function normalizeTeamEventsQuery(
@@ -197,7 +283,7 @@ export function normalizeTeamEventsQuery(
 	}
 
 	const count = normalizeCount(cmdOpts.count ?? defaults.count, 'count', 20);
-	const max_membership_pages = normalizePositiveInt(cmdOpts.maxMembershipPages ?? defaults.max_membership_pages, 'max_membership_pages', 10);
+	const max_membership_pages = normalizePositiveInt(cmdOpts.maxMembershipPages ?? defaults.max_membership_pages ?? defaults.maxMembershipPages, 'max_membership_pages', 10);
 	const member_email = normalizeOptionalString(cmdOpts.memberEmail ?? defaults.member_email ?? defaults.memberEmail, 'member_email');
 	const member_uri = normalizeOptionalString(cmdOpts.memberUri ?? defaults.member_uri ?? defaults.memberUri, 'member_uri');
 	const event_type_name = normalizeEventTypeName(cmdOpts.eventTypeName ?? defaults.event_type_name ?? defaults.eventTypeName);
@@ -262,7 +348,10 @@ export async function scanTeamEvents(
 	});
 
 	const { pageSize, maxPages } = getCountPageWindow(query.count);
-	const collected: Array<{ member: TeamMemberContext; event: any }> = [];
+	const collected: Array<{ member: TeamMemberContext; members: TeamMemberContext[]; event: any; scanIndex: number }> = [];
+	const seenEventKeys = new Set<string>();
+	const seenEventIndexByKey = new Map<string, number>();
+	let nextScanIndex = 0;
 	let membersScanned = 0;
 	let eventPagesScanned = 0;
 	let eventsScanned = 0;
@@ -270,10 +359,6 @@ export async function scanTeamEvents(
 	let memberEventPageLimitReached = false;
 
 	for (const { membership, userUri } of uniqueMembers) {
-		if (collected.length >= query.count) {
-			reachedResultCap = true;
-			break;
-		}
 		membersScanned += 1;
 		const memberContext = toTeamMemberContext(membership);
 		let pageToken: string | undefined;
@@ -282,7 +367,7 @@ export async function scanTeamEvents(
 		const memberEventScanLimit = pageSize * maxPages;
 
 		while (memberPages < maxPages && memberEventsScanned < memberEventScanLimit) {
-			const page = await fetchers.fetchMemberEventsPage(userUri, pageToken, query.include_invitees === true);
+			const page = await fetchers.fetchMemberEventsPage(userUri, pageToken, query.include_invitees === true, pageSize);
 			const events = toRecordCollection(page?.collection);
 			memberPages += 1;
 			eventPagesScanned += 1;
@@ -293,14 +378,23 @@ export async function scanTeamEvents(
 				if (!matchesEventTypeName(event, query.event_type_name)) {
 					continue;
 				}
-				collected.push({ member: memberContext, event });
-				if (collected.length >= query.count) {
-					reachedResultCap = true;
-					break;
+				const dedupKey = getTeamEventDedupKey(event);
+				if (dedupKey && seenEventKeys.has(dedupKey)) {
+					const existingIndex = seenEventIndexByKey.get(dedupKey);
+					if (existingIndex !== undefined) {
+						const existing = collected[existingIndex];
+						if (existing && !existing.members.some((member) => sameMember(member, memberContext))) {
+							existing.members.push(memberContext);
+						}
+					}
+					continue;
 				}
-			}
-			if (reachedResultCap) {
-				break;
+				if (dedupKey) {
+					seenEventKeys.add(dedupKey);
+					seenEventIndexByKey.set(dedupKey, collected.length);
+				}
+				collected.push({ member: memberContext, members: [memberContext], event, scanIndex: nextScanIndex });
+				nextScanIndex += 1;
 			}
 
 			pageToken = page?.next_page_token;
@@ -314,26 +408,37 @@ export async function scanTeamEvents(
 		}
 	}
 
-	let hydratedEvents = collected.map((entry) => entry.event);
+	const orderedCollected = collected
+		.slice()
+		.sort((left, right) => {
+			const startDiff = toEventTimeSortKey(left.event) - toEventTimeSortKey(right.event);
+			if (startDiff !== 0) {
+				return startDiff;
+			}
+			return left.scanIndex - right.scanIndex;
+		});
+
+	reachedResultCap = orderedCollected.length > query.count;
+	const limitedCollected = orderedCollected.slice(0, query.count);
+
+	let hydratedEvents = limitedCollected.map((entry) => entry.event);
 	let inviteeHydration: unknown = undefined;
 	if (query.include_invitees === true && query.hydrate_invitees !== false) {
-		const hydrated = await hydrateMissingInvitees(
+		const hydrated = await hydrateTeamEventInvitees(
 			hydratedEvents,
-			{
-				hydrate_invitees: true,
-				max_invitee_fetches: query.max_invitee_fetches,
-			},
+			query.max_invitee_fetches,
 			fetchers.fetchEventInviteesPage,
 		);
 		hydratedEvents = hydrated.collection;
 		inviteeHydration = hydrated.meta;
 	}
 
-	const collection = collected.map((entry, index) => {
+	const collection = limitedCollected.map((entry, index) => {
 		const event = hydratedEvents[index] ?? entry.event;
 		const invitees = normalizeInvitees(event?.invitees);
 		return {
 			member: entry.member,
+			members: entry.members,
 			event,
 			invitees,
 			invitee_count: eventInviteeCount(event),
@@ -365,9 +470,20 @@ export async function scanTeamEvents(
 }
 
 export function createTeamEventsTextLabel(record: TeamEventRecord): string {
-	const memberLabel = record.member.user_name ?? record.member.user_email ?? record.member.user_uri ?? 'Unknown member';
+	const memberLabel = createMembersDisplayLabel(record.members);
 	const eventLabel = record.event?.name ?? record.event?.event_type?.name ?? record.event?.event_type_name ?? 'Unnamed event';
 	return `${memberLabel} — ${eventLabel}`;
+}
+
+function createInviteeDisplayLabel(record: TeamEventRecord): string {
+	const inviteeNames = normalizeInvitees(record.invitees).map((invitee: any) => invitee.name || invitee.email).filter(Boolean);
+	if (inviteeNames.length > 0) {
+		return `${record.invitee_count || inviteeNames.length} (${inviteeNames.join(', ')})`;
+	}
+	if ((record.invitee_count || 0) > 0) {
+		return `${record.invitee_count} (details unavailable)`;
+	}
+	return '0 (None)';
 }
 
 export function printTeamEventsResult(resultData: TeamEventsResult, format: string): void {
@@ -385,8 +501,7 @@ export function printTeamEventsResult(resultData: TeamEventsResult, format: stri
 		console.log('| Member | Event | Start Time | Status | Invitees |');
 		console.log('|--------|-------|------------|--------|----------|');
 		for (const record of events) {
-			const inviteeNames = normalizeInvitees(record.invitees).map((invitee: any) => invitee.name || invitee.email).join(', ') || 'None';
-			console.log(`| ${record.member.user_name || record.member.user_email || record.member.user_uri || 'Unknown member'} | ${record.event?.name || 'Unnamed event'} | ${record.event?.start_time || ''} | ${record.event?.status || ''} | ${record.invitee_count || 0} (${inviteeNames}) |`);
+			console.log(`| ${createMembersDisplayLabel(record.members)} | ${record.event?.name || 'Unnamed event'} | ${record.event?.start_time || ''} | ${record.event?.status || ''} | ${createInviteeDisplayLabel(record)} |`);
 		}
 		return;
 	}
@@ -399,14 +514,14 @@ export function printTeamEventsResult(resultData: TeamEventsResult, format: stri
 	console.log('Team Events:\n');
 	for (const record of events) {
 		console.log(`Event: ${record.event?.name || 'Unnamed event'}`);
-		console.log(`  Member: ${record.member.user_name || record.member.user_email || record.member.user_uri || 'Unknown member'}`);
+		console.log(`  Member: ${createMembersDisplayLabel(record.members)}`);
 		console.log(`  Start: ${record.event?.start_time || ''}`);
 		console.log(`  Status: ${record.event?.status || ''}`);
 		console.log(`  Label: ${createTeamEventsTextLabel(record)}`);
 		console.log('  Invitees:');
 		const invitees = normalizeInvitees(record.event?.invitees);
 		if (invitees.length === 0) {
-			console.log('    (none)');
+			console.log((record.invitee_count || 0) > 0 ? '    (details unavailable)' : '    (none)');
 		} else {
 			for (const invitee of invitees) {
 				console.log(`    - ${invitee.name || invitee.email || 'Unknown invitee'}${invitee.email ? ` <${invitee.email}>` : ''}`);

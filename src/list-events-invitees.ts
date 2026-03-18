@@ -96,11 +96,20 @@ export function eventActiveInviteeCounter(event: any): number {
 	return Math.max(0, Math.trunc(numeric));
 }
 
+export function eventTotalInviteeCounter(event: any): number {
+	const total = event?.invitees_counter?.total;
+	const numeric = typeof total === 'number' ? total : Number(total);
+	if (!Number.isFinite(numeric)) {
+		return eventActiveInviteeCounter(event);
+	}
+	return Math.max(0, Math.trunc(numeric));
+}
+
 export function shouldHydrateEventInvitees(event: any): boolean {
 	if (normalizeInvitees(event?.invitees).length > 0) {
 		return false;
 	}
-	return eventActiveInviteeCounter(event) > 0;
+	return eventTotalInviteeCounter(event) > 0;
 }
 
 export function normalizeMaxInviteeFetches(input: unknown, fallback: number = DEFAULT_MAX_INVITEE_FETCHES): number {
@@ -243,7 +252,11 @@ export async function hydrateMissingInvitees(
 }
 
 export function eventInviteeCount(event: any): number {
-	return normalizeInvitees(event?.invitees).length;
+	const embeddedInvitees = normalizeInvitees(event?.invitees);
+	if (embeddedInvitees.length > 0) {
+		return embeddedInvitees.length;
+	}
+	return eventTotalInviteeCounter(event);
 }
 
 export function extractInviteePaginationMeta(responseData: any): InviteePaginationMeta {
