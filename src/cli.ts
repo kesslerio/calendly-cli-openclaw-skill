@@ -995,7 +995,8 @@ function printEventsWithInviteesResult(resultData: any, format: string): void {
 		console.log('| Event | Start Time | Status | Invitees |');
 		console.log('|-------|------------|--------|----------|');
 		for (const event of events) {
-			const inviteeNames = normalizeInvitees(event.invitees).map((i: any) => i.name || i.email).join(', ') || 'None';
+			const invitees = normalizeInvitees(event.invitees);
+			const inviteeNames = invitees.map((i: any) => i.name || i.email).join(', ') || ((event.invitee_count || 0) > 0 ? 'details unavailable' : 'None');
 			console.log(`| ${event.name} | ${event.start_time} | ${event.status} | ${event.invitee_count || 0} (${inviteeNames}) |`);
 		}
 		return;
@@ -1013,7 +1014,7 @@ function printEventsWithInviteesResult(resultData: any, format: string): void {
 		console.log('  Invitees:');
 		const invitees = normalizeInvitees(event.invitees);
 		if (invitees.length === 0) {
-			console.log('    (none)');
+			console.log((event.invitee_count || 0) > 0 ? '    (details unavailable)' : '    (none)');
 		} else {
 			for (const invitee of invitees) {
 				console.log(`    - ${invitee.name || invitee.email} (${invitee.email})`);

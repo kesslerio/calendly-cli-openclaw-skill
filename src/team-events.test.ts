@@ -191,6 +191,48 @@ describe('scanTeamEvents', () => {
 		expect(result.collection[0].member.user_name).toBe('Former or unknown member');
 	});
 
+	test('skips the org-wide rescan after a complete unfiltered member scan in normal cases', async () => {
+		let orgEventCalls = 0;
+		const result = await scanTeamEvents(
+			{
+				organization_uri: 'https://api.calendly.com/organizations/O1',
+				count: 20,
+				max_membership_pages: 10,
+			},
+			{
+				fetchMembershipPage: async () => ({
+					collection: [
+						{
+							uri: 'https://api.calendly.com/organization_memberships/M1',
+							user: { uri: 'https://api.calendly.com/users/U1', email: 'a@example.com', name: 'Member A' },
+							organization: 'https://api.calendly.com/organizations/O1',
+						},
+					],
+				}),
+				fetchMemberEventsPage: async () => ({
+					collection: [
+						{
+							uri: 'https://api.calendly.com/scheduled_events/E1',
+							name: 'Current Member Demo',
+							start_time: '2026-03-01T15:00:00Z',
+							status: 'active',
+							invitees_counter: { active: 1, total: 1 },
+						},
+					],
+				}),
+				fetchOrganizationEventsPage: async () => {
+					orgEventCalls += 1;
+					return { collection: [] };
+				},
+				fetchEventInviteesPage: async () => ({ collection: [] }),
+			}
+		);
+
+		expect(orgEventCalls).toBe(0);
+		expect(result.collection).toHaveLength(1);
+		expect(result.collection[0].event.name).toBe('Current Member Demo');
+	});
+
 	test('keeps the org-wide supplement when membership scanning is truncated, with a conservative attribution label', async () => {
 		let membershipCalls = 0;
 		let orgEventCalls = 0;
@@ -238,6 +280,68 @@ describe('scanTeamEvents', () => {
 		expect(result.collection.some((record) => record.event.name === 'Recovered Org Event')).toBe(true);
 		expect(result.collection.find((record) => record.event.name === 'Recovered Org Event')?.member.user_name).toBe('Unscanned, former, or unknown member');
 		expect(result.meta.truncation_reason).toBe('membership_page_limit');
+	});
+
+	test('preserves the org-wide history pass for member_email backfills when the member is no longer in current memberships', async () => {
+		let memberEventCalls = 0;
+		let orgEventCalls = 0;
+		const result = await scanTeamEvents(
+			{
+				organization_uri: 'https://api.calendly.com/organizations/O1',
+				count: 20,
+				max_membership_pages: 10,
+				member_email: 'departed@example.com',
+			},
+			{
+				fetchMembershipPage: async () => ({
+					collection: [
+						{
+							uri: 'https://api.calendly.com/organization_memberships/M1',
+							user: { uri: 'https://api.calendly.com/users/U1', email: 'current@example.com', name: 'Current Member' },
+							organization: 'https://api.calendly.com/organizations/O1',
+						},
+					],
+				}),
+				fetchMemberEventsPage: async () => {
+					memberEventCalls += 1;
+					return { collection: [] };
+				},
+				fetchOrganizationEventsPage: async () => {
+					orgEventCalls += 1;
+					return {
+						collection: [
+							{
+								uri: 'https://api.calendly.com/scheduled_events/E-departed',
+								name: 'Departed Rep Demo',
+								start_time: '2026-03-05T15:00:00Z',
+								status: 'active',
+								invitees_counter: { active: 1, total: 1 },
+								event_memberships: [
+									{ user_email: 'departed@example.com', user_name: 'Departed Rep' },
+								],
+							},
+							{
+								uri: 'https://api.calendly.com/scheduled_events/E-other',
+								name: 'Other Rep Demo',
+								start_time: '2026-03-06T15:00:00Z',
+								status: 'active',
+								invitees_counter: { active: 1, total: 1 },
+								event_memberships: [
+									{ user_email: 'other@example.com', user_name: 'Other Rep' },
+								],
+							},
+						],
+					};
+				},
+				fetchEventInviteesPage: async () => ({ collection: [] }),
+			}
+		);
+
+		expect(memberEventCalls).toBe(0);
+		expect(orgEventCalls).toBe(1);
+		expect(result.collection).toHaveLength(1);
+		expect(result.collection[0].event.name).toBe('Departed Rep Demo');
+		expect(result.collection[0].member.user_name).toBe('Former or unknown member');
 	});
 
 	test('de-duplicates shared events returned from multiple member calendars', async () => {

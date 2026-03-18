@@ -169,6 +169,43 @@ function matchesMemberScope(member: TeamMemberContext, query: TeamEventsQuery): 
 	return true;
 }
 
+function toEventMemberContexts(event: any): TeamMemberContext[] {
+	const memberships = Array.isArray(event?.event_memberships) ? event.event_memberships : [];
+	return memberships
+		.filter((membership: any) => Boolean(membership) && typeof membership === 'object')
+		.map((membership: any) => {
+			const nestedUser = typeof membership?.user === 'object' && membership.user !== null ? membership.user : undefined;
+			const userUri = typeof membership?.user === 'string'
+				? membership.user
+				: (typeof nestedUser?.uri === 'string' ? nestedUser.uri : undefined);
+			const userEmail = typeof membership?.user_email === 'string'
+				? membership.user_email
+				: (typeof membership?.email === 'string'
+					? membership.email
+					: (typeof nestedUser?.email === 'string' ? nestedUser.email : undefined));
+			const userName = typeof membership?.user_name === 'string'
+				? membership.user_name
+				: (typeof nestedUser?.name === 'string' ? nestedUser.name : undefined);
+			return {
+				user_uri: userUri,
+				user_email: userEmail,
+				user_name: userName,
+				organization_uri: typeof membership?.organization === 'string' ? membership.organization : undefined,
+			} satisfies TeamMemberContext;
+		});
+}
+
+function matchesOrgFallbackScope(event: any, query: TeamEventsQuery): boolean {
+	if (!query.member_email && !query.member_uri) {
+		return true;
+	}
+	const eventMembers = toEventMemberContexts(event);
+	if (eventMembers.length === 0) {
+		return false;
+	}
+	return eventMembers.some((member) => matchesMemberScope(member, query));
+}
+
 function getTeamEventDedupKey(event: any): string | undefined {
 	const eventUuid = getEventUuid(event);
 	if (eventUuid) {
@@ -364,6 +401,15 @@ export async function scanTeamEvents(
 	let eventsScanned = 0;
 	let reachedResultCap = false;
 	let memberEventPageLimitReached = false;
+	const shouldRunOrganizationFallback = Boolean(fetchers.fetchOrganizationEventsPage) && (
+		membershipPageLimitReached ||
+		uniqueMembers.length === 0 ||
+		Boolean(query.member_email) ||
+		Boolean(query.member_uri) ||
+		Boolean(query.min_start_time) ||
+		Boolean(query.max_start_time) ||
+		query.status === 'canceled'
+	);
 
 	for (const { membership, userUri } of uniqueMembers) {
 		membersScanned += 1;
@@ -415,7 +461,7 @@ export async function scanTeamEvents(
 		}
 	}
 
-	if (!query.member_email && !query.member_uri && fetchers.fetchOrganizationEventsPage) {
+	if (shouldRunOrganizationFallback && fetchers.fetchOrganizationEventsPage) {
 		const unattributedMember = createUnattributedMemberContext(
 			query.organization_uri,
 			membershipPageLimitReached ? 'Unscanned, former, or unknown member' : 'Former or unknown member'
@@ -435,6 +481,9 @@ export async function scanTeamEvents(
 
 			for (const event of events) {
 				if (!matchesEventTypeName(event, query.event_type_name)) {
+					continue;
+				}
+				if (!matchesOrgFallbackScope(event, query)) {
 					continue;
 				}
 				const dedupKey = getTeamEventDedupKey(event);
