@@ -85,6 +85,20 @@ Supports pagination with `--page-size` and `--max-pages` for large orgs.
 This command resolves team members from organization memberships, scans each member's events in bounded pages, and returns matching events with member context.
 `--max-membership-pages` defaults to `10`; if more data exists than the configured scan limits allow, output meta includes `has_more: true` and a `truncation_reason`.
 
+### List Team Events
+
+```bash
+./calendly list-team-events \
+  --organization-uri "<YOUR_ORG_URI>" \
+  --min-start-time "2026-01-20T00:00:00Z" \
+  --max-start-time "2026-01-27T23:59:59Z" \
+  --include-invitees
+```
+
+This command scans organization memberships and then lists scheduled events for each member, making it suitable for team-wide demo counts and member breakdowns.
+Useful filters include `--status`, `--member-email`, `--member-uri`, and `--event-type-name`.
+Use `--include-invitees` when you want invitee details in the same response.
+
 ### Batch Invitee Lookup by Event URI
 
 ```bash

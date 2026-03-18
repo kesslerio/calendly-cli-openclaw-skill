@@ -3,6 +3,7 @@ import {
 	DEFAULT_MAX_INVITEE_FETCHES,
 	eventInviteeCount,
 	extractInviteePaginationMeta,
+	hydrateInviteesPerEvent,
 	hydrateMissingInvitees,
 	normalizeExpandValues,
 	normalizeMaxInviteeFetches,
@@ -10,7 +11,7 @@ import {
 	shouldHydrateEventInvitees,
 	shouldIncludeInvitees,
 	toCalendlyScheduledEventsParams,
-} from './src/list-events-invitees';
+} from './list-events-invitees';
 
 describe('normalizeExpandValues', () => {
 	test('handles csv, arrays and empty values', () => {
@@ -61,6 +62,27 @@ describe('normalizeInvitees and eventInviteeCount', () => {
 		expect(eventInviteeCount({ invitees })).toBe(2);
 	});
 
+	test('falls back to invitees_counter.total when invitees are not expanded', () => {
+		expect(eventInviteeCount({ invitees: undefined, invitees_counter: { total: 3, active: 2 } })).toBe(3);
+		expect(eventInviteeCount({ invitees: [], invitees_counter: { total: '2', active: '1' } })).toBe(2);
+		expect(eventInviteeCount({ invitees: [], status: 'canceled', invitees_counter: { total: 4, active: 0 } })).toBe(4);
+	});
+
+	test('uses counters instead of partial invitee arrays when hydration is truncated or fails', () => {
+		expect(eventInviteeCount({
+			status: 'active',
+			invitees: [{ email: 'one@example.com' }],
+			invitees_counter: { total: 4, active: 3 },
+			invitee_hydration: { used: true, truncated: true, reason: 'max_invitee_fetches_reached' },
+		})).toBe(3);
+		expect(eventInviteeCount({
+			status: 'canceled',
+			invitees: [{ email: 'one@example.com' }],
+			invitees_counter: { total: 4, active: 0 },
+			invitee_hydration: { used: true, truncated: false, reason: 'invitee_fetch_failed' },
+		})).toBe(4);
+	});
+
 	test('returns empty array/count for empty and non-array cases', () => {
 		expect(normalizeInvitees(undefined)).toEqual([]);
 		expect(normalizeInvitees({})).toEqual([]);
@@ -95,6 +117,10 @@ describe('shouldHydrateEventInvitees', () => {
 			invitees_counter: { active: 2 },
 			invitees: [{ email: 'embedded@example.com' }],
 		})).toBe(false);
+	});
+
+	test('hydrates canceled events when total invitees are positive even if active is zero', () => {
+		expect(shouldHydrateEventInvitees({ invitees_counter: { total: 2, active: 0 }, invitees: [] })).toBe(true);
 	});
 });
 
@@ -262,6 +288,42 @@ describe('hydrateMissingInvitees', () => {
 			used: false,
 			truncated: true,
 			reason: 'max_invitee_fetches_reached',
+		});
+	});
+
+	test('applies max_invitee_fetches independently per listed event', async () => {
+		let fetches = 0;
+		const result = await hydrateInviteesPerEvent(
+			[
+				{ uri: 'https://api.calendly.com/scheduled_events/evt-1', invitees_counter: { active: 2, total: 2 }, invitees: [] },
+				{ uri: 'https://api.calendly.com/scheduled_events/evt-2', invitees_counter: { active: 2, total: 2 }, invitees: [] },
+			],
+			{ hydrate_invitees: true, max_invitee_fetches: 1 },
+			async (eventUuid) => {
+				fetches += 1;
+				return { collection: [{ email: `${eventUuid}@example.com` }], next_page_token: 'next' };
+			}
+		);
+
+		expect(fetches).toBe(2);
+		expect(result.collection[0].invitees).toEqual([{ email: 'evt-1@example.com' }]);
+		expect(result.collection[1].invitees).toEqual([{ email: 'evt-2@example.com' }]);
+		expect(result.collection[0].invitee_hydration).toEqual({
+			used: true,
+			truncated: true,
+			reason: 'max_invitee_fetches_reached',
+		});
+		expect(result.collection[1].invitee_hydration).toEqual({
+			used: true,
+			truncated: true,
+			reason: 'max_invitee_fetches_reached',
+		});
+		expect(result.meta).toMatchObject({
+			fetches_used: 2,
+			max_fetches: 2,
+			max_fetches_per_event: 1,
+			events_needing_hydration: 2,
+			truncated: true,
 		});
 	});
 });

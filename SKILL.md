@@ -49,6 +49,9 @@ calendly cancel-event --event-uuid <UUID> --reason "Rescheduling needed"
 - `batch-event-invitees` - Batch lookup invitees for multiple events (repeat `--event-uri`)
 - `search-invitees` - Search events by invitee email across paginated results
 
+### Team Events
+- `list-team-events` - List scheduled events for a team by scanning organization memberships and member calendars
+
 ### Organization
 - `list-organization-memberships` - List organization memberships
 
@@ -98,12 +101,19 @@ calendly list-events \
   --user-uri "<YOUR_USER_URI>" \
   -o json | jq .
 
-# List events with invitees (expand first, then fallback hydrate if needed)
+# List events with invitees (expand first; bounded fallback)
 calendly list-events \
   --user-uri "<YOUR_USER_URI>" \
   --include-invitees \
   --max-invitee-fetches 25 \
   --status active
+
+# List team events for a shared calendar/org scope
+calendly list-team-events \
+  --organization-uri "<YOUR_ORG_URI>" \
+  --min-start-time "2026-01-20T00:00:00Z" \
+  --max-start-time "2026-01-27T23:59:59Z" \
+  --include-invitees
 
 # Get event details
 calendly get-event \

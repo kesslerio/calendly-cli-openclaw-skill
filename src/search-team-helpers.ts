@@ -1,4 +1,4 @@
-import { normalizeDateRange } from './src/date-range';
+import { normalizeDateRange } from './date-range';
 
 export type TeamSearchOptions = {
 	email: string;
