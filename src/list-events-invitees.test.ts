@@ -10,7 +10,7 @@ import {
 	shouldHydrateEventInvitees,
 	shouldIncludeInvitees,
 	toCalendlyScheduledEventsParams,
-} from './src/list-events-invitees';
+} from './list-events-invitees';
 
 describe('normalizeExpandValues', () => {
 	test('handles csv, arrays and empty values', () => {
