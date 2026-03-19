@@ -344,9 +344,11 @@ cat > mcporter.json <<EOF
 }
 EOF
 
-# Generate CLI
-MCPORTER_CONFIG=./mcporter.json npx mcporter@latest generate-cli --server calendly --output calendly
+# Generate the mcporter artifact
+MCPORTER_CONFIG=./mcporter.json npx mcporter@latest generate-cli --server calendly --output src/generated/cli.ts
 ```
+
+The public `./calendly` launcher stays stable and loads the handwritten `src/cli.ts` composition entrypoint, which in turn imports the generated `src/generated/cli.ts` artifact.
 
 ## License
 
