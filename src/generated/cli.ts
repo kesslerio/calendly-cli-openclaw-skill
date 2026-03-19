@@ -2525,7 +2525,7 @@ async function invokeWithTimeout<T>(call: Promise<T>, timeout: number): Promise<
 	}
 }
 
-async function runCli(): Promise<void> {
+export async function runCli(): Promise<void> {
 	const args = process.argv.slice(2);
 	if (args.length === 0) {
 		program.outputHelp();
