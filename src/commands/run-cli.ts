@@ -1,16 +1,4 @@
 import { createProgram } from './program';
-import { registerBatchEventInviteesCommands } from './register-batch-event-invitees';
-import { registerCurrentUserCommands } from './register-current-user';
-import { registerBasicEventCommands } from './register-events-basic';
-import { registerEventTypeCommands } from './register-event-types';
-import { registerListEventsCommands } from './register-list-events';
-import { registerOauthCommands } from './register-oauth';
-import { registerOrganizationMembershipCommands } from './register-organization-memberships';
-import { registerSearchInviteesCommands } from './register-search-invitees';
-import { registerSearchTeamCommands } from './register-search-team';
-import { registerSchedulingCommands } from './register-scheduling';
-import { registerTeamEventsCommands } from './register-team-events';
-import { registerWebhookCommands } from './register-webhooks';
 
 const HANDWRITTEN_COMMANDS = new Set([
 	'list-webhook-subscriptions',
@@ -87,6 +75,49 @@ function hasHelpFlag(argv: string[]): boolean {
 	return argv.slice(2).some((token) => token === '-h' || token === '--help' || token === 'help');
 }
 
+async function registerHandwrittenCommands(program: ReturnType<typeof createProgram>): Promise<void> {
+	const [
+		oauth,
+		currentUser,
+		listEvents,
+		eventTypes,
+		basicEvents,
+		batchInvitees,
+		searchInvitees,
+		teamEvents,
+		searchTeam,
+		scheduling,
+		webhooks,
+		organizationMemberships,
+	] = await Promise.all([
+		import('./register-oauth'),
+		import('./register-current-user'),
+		import('./register-list-events'),
+		import('./register-event-types'),
+		import('./register-events-basic'),
+		import('./register-batch-event-invitees'),
+		import('./register-search-invitees'),
+		import('./register-team-events'),
+		import('./register-search-team'),
+		import('./register-scheduling'),
+		import('./register-webhooks'),
+		import('./register-organization-memberships'),
+	]);
+
+	oauth.registerOauthCommands(program);
+	currentUser.registerCurrentUserCommands(program);
+	listEvents.registerListEventsCommands(program);
+	eventTypes.registerEventTypeCommands(program);
+	basicEvents.registerBasicEventCommands(program);
+	batchInvitees.registerBatchEventInviteesCommands(program);
+	searchInvitees.registerSearchInviteesCommands(program);
+	teamEvents.registerTeamEventsCommands(program);
+	searchTeam.registerSearchTeamCommands(program);
+	scheduling.registerSchedulingCommands(program);
+	webhooks.registerWebhookCommands(program);
+	organizationMemberships.registerOrganizationMembershipCommands(program);
+}
+
 export async function runCli(): Promise<void> {
 	const command = detectCommand(process.argv);
 	const isGlobalHelp = command === 'help' || !command || hasHelpFlag(process.argv);
@@ -100,18 +131,11 @@ export async function runCli(): Promise<void> {
 				throw error;
 			}
 			const program = createProgram();
-			registerOauthCommands(program);
-			registerCurrentUserCommands(program);
-			registerListEventsCommands(program);
-			registerEventTypeCommands(program);
-			registerBasicEventCommands(program);
-			registerBatchEventInviteesCommands(program);
-			registerSearchInviteesCommands(program);
-			registerTeamEventsCommands(program);
-			registerSearchTeamCommands(program);
-			registerSchedulingCommands(program);
-			registerOrganizationMembershipCommands(program);
-			registerWebhookCommands(program);
+			try {
+				await registerHandwrittenCommands(program);
+			} catch {
+				// Keep global help reachable even when handwritten command modules cannot load.
+			}
 			program.outputHelp();
 			console.error('\nNote: Full command set is unavailable because generated CLI dependencies are missing.');
 			console.error('Install runtime deps (e.g. mcporter) to restore all generated commands.');
@@ -120,17 +144,6 @@ export async function runCli(): Promise<void> {
 	}
 
 	const program = createProgram();
-	registerOauthCommands(program);
-	registerCurrentUserCommands(program);
-	registerListEventsCommands(program);
-	registerEventTypeCommands(program);
-	registerBasicEventCommands(program);
-	registerBatchEventInviteesCommands(program);
-	registerSearchInviteesCommands(program);
-	registerTeamEventsCommands(program);
-	registerSearchTeamCommands(program);
-	registerSchedulingCommands(program);
-	registerWebhookCommands(program);
-	registerOrganizationMembershipCommands(program);
+	await registerHandwrittenCommands(program);
 	await program.parseAsync(process.argv);
 }
