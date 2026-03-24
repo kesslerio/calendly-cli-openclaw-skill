@@ -58,7 +58,7 @@ describe('normalizeInvitees and eventInviteeCount', () => {
 			{ email: 'two@example.com' },
 		]);
 		expect(invitees.length).toBe(2);
-		expect(invitees[0].email).toBe('one@example.com');
+		expect(invitees[0]?.email).toBe('one@example.com');
 		expect(eventInviteeCount({ invitees })).toBe(2);
 	});
 
