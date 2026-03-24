@@ -28,6 +28,14 @@ function parseBooleanFlag(value: string): boolean {
 	throw new Error(`Invalid boolean value "${value}". Use true or false.`);
 }
 
+function parseIntegerFlag(value: string, optionName: string): number {
+	const trimmed = String(value).trim();
+	if (!/^-?\d+$/.test(trimmed)) {
+		throw new Error(`Invalid ${optionName} value "${value}". Use an integer.`);
+	}
+	return Number.parseInt(trimmed, 10);
+}
+
 function shouldIncludeInvitees(args: Record<string, unknown>): boolean {
 	if (args.include_invitees === true) {
 		return true;
@@ -221,7 +229,7 @@ export function registerListEventsCommands(program: Command): void {
 		.option('--status <status:active|canceled>', 'Filter events by status (choices: active, canceled; example: active)')
 		.option('--max-start-time <max-start-time:iso-8601>', 'Maximum start time for events (ISO 8601 format)')
 		.option('--min-start-time <min-start-time:iso-8601>', 'Minimum start time for events (ISO 8601 format)')
-		.option('--count <count:number>', 'Number of events to return (default 20, max 100) (example: 1)', (value) => parseFloat(value))
+		.option('--count <count:number>', 'Number of events to return (default 20, max 100) (example: 1)', (value) => parseIntegerFlag(value, 'count'))
 		.option('--include-invitees', 'Include invitee details using Calendly expand=invitees in the same list-events call')
 		.option('--expand <expand:invitees>', 'Compatibility expand value; currently supports invitees')
 		.option('--hydrate-invitees <hydrate-invitees:boolean>', 'Hydrate missing invitees with per-event fallback calls (default true for include-invitees path)', parseBooleanFlag)
@@ -266,7 +274,7 @@ export function registerListEventsCommands(program: Command): void {
 		.option('--status <status:active|canceled>', 'Filter events by status (choices: active, canceled; example: active)')
 		.option('--max-start-time <max-start-time:iso-8601>', 'Maximum start time for events (ISO 8601 format)')
 		.option('--min-start-time <min-start-time:iso-8601>', 'Minimum start time for events (ISO 8601 format)')
-		.option('--count <count:number>', 'Number of events to return (default 20, max 100) (example: 1)', (value) => parseInt(value, 10))
+		.option('--count <count:number>', 'Number of events to return (default 20, max 100) (example: 1)', (value) => parseIntegerFlag(value, 'count'))
 		.option('--hydrate-invitees <hydrate-invitees:boolean>', 'Hydrate missing invitees with per-event fallback calls (default true)', parseBooleanFlag)
 		.option('--max-invitee-fetches <max-invitee-fetches:number>', 'Safety cap for per-event invitee fallback API calls (default 25)', (value) => parseInt(value, 10))
 		.action(async (cmdOpts) => {

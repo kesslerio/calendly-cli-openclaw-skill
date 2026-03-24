@@ -10,6 +10,20 @@ function requireApiKey(): string {
 	return apiKey;
 }
 
+function isMcpUnavailableError(error: unknown): boolean {
+	const message = (error instanceof Error ? `${error.name}: ${error.message}` : String(error)).toLowerCase();
+	return (
+		message.includes('enoent') ||
+		message.includes('econnrefused') ||
+		message.includes('econnreset') ||
+		message.includes('posix_spawn') ||
+		(message.includes('spawn') && message.includes('npx')) ||
+		message.includes('command not found') ||
+		message.includes('no such file or directory') ||
+		message.includes('failed to connect')
+	);
+}
+
 async function calendlyPost(
 	url: string,
 	apiKey: string,
@@ -137,21 +151,27 @@ export function registerBasicEventCommands(program: Command): void {
 			if (cmdOpts.reason !== undefined) args.reason = cmdOpts.reason;
 
 			let mcpErrorMessage: string | undefined;
+			let fallbackToRest = false;
+			let runtime: Awaited<ReturnType<typeof ensureRuntime>> | undefined;
 			try {
-				const runtime = await ensureRuntime();
+				runtime = await ensureRuntime();
 				const proxy = getServerProxy(runtime) as any;
-				try {
-					const call = proxy.cancelEvent(args);
-					const result = await invokeWithTimeout(call, timeout);
-					printMcpResult(result, globalOptions.output ?? 'text');
-					return;
-				} catch (error) {
-					mcpErrorMessage = error instanceof Error ? error.message : String(error);
-				} finally {
-					await runtime.close(SERVER_NAME).catch(() => {});
-				}
+				const call = proxy.cancelEvent(args);
+				const result = await invokeWithTimeout(call, timeout);
+				printMcpResult(result, globalOptions.output ?? 'text');
+				return;
 			} catch (error) {
 				mcpErrorMessage = error instanceof Error ? error.message : String(error);
+				fallbackToRest = runtime === undefined || isMcpUnavailableError(error);
+			} finally {
+				if (runtime) {
+					await runtime.close(SERVER_NAME).catch(() => {});
+				}
+			}
+
+			if (!fallbackToRest) {
+				console.error(`Error: ${mcpErrorMessage}`);
+				process.exit(1);
 			}
 
 			try {
