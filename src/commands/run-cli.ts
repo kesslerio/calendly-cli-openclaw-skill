@@ -12,6 +12,7 @@ const HANDWRITTEN_COMMANDS = new Set([
 	'list-events',
 	'list_events',
 	'list-events-with-invitees',
+	'list_events_with_invitees',
 	'get-oauth-url',
 	'get_oauth_url',
 	'exchange-code-for-tokens',

@@ -260,6 +260,7 @@ export function registerListEventsCommands(program: Command): void {
 		.option('--count <count:number>', 'Number of events to return (default 20, max 100) (example: 1)', (value) => parseIntegerFlag(value, 'count'))
 		.option('--hydrate-invitees <hydrate-invitees:boolean>', 'Hydrate missing invitees with per-event fallback calls (default true)', parseBooleanFlag)
 		.option('--max-invitee-fetches <max-invitee-fetches:number>', 'Safety cap for per-event invitee fallback API calls (default 25)', (value) => parseInt(value, 10))
+		.alias('list_events_with_invitees')
 		.action(async (cmdOpts) => {
 			const globalOptions = program.opts();
 			try {
