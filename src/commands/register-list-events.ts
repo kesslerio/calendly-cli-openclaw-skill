@@ -4,6 +4,7 @@ import {
 	extractInviteePaginationMeta,
 	hydrateInviteesPerEvent,
 	normalizeInvitees,
+	shouldIncludeInvitees,
 	toCalendlyScheduledEventsParams,
 } from '../list-events-invitees';
 import { normalizeListEventsQuery } from '../list-events-query';
@@ -34,24 +35,6 @@ function parseIntegerFlag(value: string, optionName: string): number {
 		throw new Error(`Invalid ${optionName} value "${value}". Use an integer.`);
 	}
 	return Number.parseInt(trimmed, 10);
-}
-
-function shouldIncludeInvitees(args: Record<string, unknown>): boolean {
-	if (args.include_invitees === true) {
-		return true;
-	}
-	if (typeof args.expand === 'string') {
-		return args.expand
-			.split(',')
-			.map((entry) => entry.trim().toLowerCase())
-			.includes('invitees');
-	}
-	if (Array.isArray(args.expand)) {
-		return args.expand
-			.map((entry) => String(entry).trim().toLowerCase())
-			.includes('invitees');
-	}
-	return false;
 }
 
 async function calendlyGet(

@@ -10,6 +10,14 @@ function requireApiKey(): string {
 	return apiKey;
 }
 
+function parseIntegerFlag(value: string, optionName: string): number {
+	const trimmed = String(value).trim();
+	if (!/^-?\d+$/.test(trimmed)) {
+		throw new Error(`Invalid ${optionName} value "${value}". Use an integer.`);
+	}
+	return Number.parseInt(trimmed, 10);
+}
+
 async function requestCalendlyJson(
 	url: string,
 	apiKey: string,
@@ -57,7 +65,7 @@ export function registerOrganizationMembershipCommands(program: Command): void {
 		.option('--user-uri <user-uri>', 'URI of the user')
 		.option('--organization-uri <organization-uri>', 'URI of the organization')
 		.option('--email <email>', 'Filter by email')
-		.option('--count <count:number>', 'Number of memberships to return (default 20, max 100) (example: 1)', (value) => parseFloat(value))
+		.option('--count <count:number>', 'Number of memberships to return (default 20, max 100) (example: 1)', (value) => parseIntegerFlag(value, 'count'))
 		.alias('list_organization_memberships')
 		.action(async (cmdOpts) => {
 			const globalOptions = program.opts();

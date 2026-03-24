@@ -14,6 +14,14 @@ function requireApiKey(): string {
 	return apiKey;
 }
 
+function parseIntegerFlag(value: string, optionName: string): number {
+	const trimmed = String(value).trim();
+	if (!/^-?\d+$/.test(trimmed)) {
+		throw new Error(`Invalid ${optionName} value "${value}". Use an integer.`);
+	}
+	return Number.parseInt(trimmed, 10);
+}
+
 async function calendlyGet(url: string, apiKey: string, timeout: number): Promise<unknown> {
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), timeout);
@@ -94,7 +102,7 @@ export function registerEventTypeCommands(program: Command): void {
 		.option('--raw <json>', 'Provide raw JSON arguments to the tool, bypassing flag parsing.')
 		.option('--user-uri <user-uri>', 'URI of the user whose event types to list')
 		.option('--organization-uri <organization-uri>', 'URI of the organization to filter event types')
-		.option('--count <count:number>', 'Number of event types to return (default 20, max 100) (example: 20)', (value) => parseFloat(value))
+		.option('--count <count:number>', 'Number of event types to return (default 20, max 100) (example: 20)', (value) => parseIntegerFlag(value, 'count'))
 		.alias('list_event_types')
 		.action(async (cmdOpts) => {
 			const globalOptions = program.opts();

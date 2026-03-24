@@ -96,6 +96,14 @@ function collectRepeatedString(value: string, previous: string[]): string[] {
 	return [...previous, value];
 }
 
+function parseIntegerFlag(value: string, optionName: string): number {
+	const trimmed = String(value).trim();
+	if (!/^-?\d+$/.test(trimmed)) {
+		throw new Error(`Invalid ${optionName} value "${value}". Use an integer.`);
+	}
+	return Number.parseInt(trimmed, 10);
+}
+
 export function registerBatchEventInviteesCommands(program: Command): void {
 	program
 		.command('batch-event-invitees')
@@ -110,7 +118,7 @@ export function registerBatchEventInviteesCommands(program: Command): void {
 		.option('--event-uri <event-uri>', 'Scheduled event URI; repeat for multiple events', collectRepeatedString, [] as string[])
 		.option('--status <status:active|canceled>', 'Filter invitees by status (choices: active, canceled; example: active)')
 		.option('--email <email>', 'Optional invitee email filter')
-		.option('--count <count:number>', 'Number of invitees per page (default 100, max 100) (example: 25)', (value) => parseFloat(value))
+		.option('--count <count:number>', 'Number of invitees per page (default 100, max 100) (example: 25)', (value) => parseIntegerFlag(value, 'count'))
 		.option('--max-invitee-fetches <max-invitee-fetches:number>', 'Safety cap for total invitee fetch calls across all events (default 25)', (value) => parseInt(value, 10))
 		.alias('batch_event_invitees')
 		.action(async (cmdOpts) => {

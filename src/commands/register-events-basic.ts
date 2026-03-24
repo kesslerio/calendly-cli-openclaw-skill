@@ -24,6 +24,14 @@ function isMcpUnavailableError(error: unknown): boolean {
 	);
 }
 
+function parseIntegerFlag(value: string, optionName: string): number {
+	const trimmed = String(value).trim();
+	if (!/^-?\d+$/.test(trimmed)) {
+		throw new Error(`Invalid ${optionName} value "${value}". Use an integer.`);
+	}
+	return Number.parseInt(trimmed, 10);
+}
+
 async function calendlyPost(
 	url: string,
 	apiKey: string,
@@ -113,7 +121,7 @@ export function registerBasicEventCommands(program: Command): void {
 		.requiredOption('--event-uuid <event-uuid>', 'UUID of the event (example: example-id)')
 		.option('--status <status:active|canceled>', 'Filter invitees by status (choices: active, canceled; example: active)')
 		.option('--email <email>', 'Filter invitees by email')
-		.option('--count <count:number>', 'Number of invitees to return (default 20, max 100) (example: 1)', (value) => parseFloat(value))
+		.option('--count <count:number>', 'Number of invitees to return (default 20, max 100) (example: 1)', (value) => parseIntegerFlag(value, 'count'))
 		.alias('list_event_invitees')
 		.action(async (cmdOpts) => {
 			const globalOptions = program.opts();
