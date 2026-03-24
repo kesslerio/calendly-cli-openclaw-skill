@@ -99,10 +99,10 @@ describe('scanTeamEvents', () => {
 		expect(eventCalls).toBe(1);
 		expect(inviteeCalls).toBe(1);
 		expect(result.collection).toHaveLength(1);
-		expect(result.collection[0].member.user_email).toBe('a@example.com');
-		expect(result.collection[0].event.name).toBe('Demo Call');
-		expect(result.collection[0].invitee_count).toBe(1);
-		expect(result.collection[0].invitees).toEqual([{ email: 'invitee@example.com', name: 'Invitee One' }]);
+		expect(result.collection[0]?.member.user_email).toBe('a@example.com');
+		expect(result.collection[0]?.event.name).toBe('Demo Call');
+		expect(result.collection[0]?.invitee_count).toBe(1);
+		expect(result.collection[0]?.invitees).toEqual([{ email: 'invitee@example.com', name: 'Invitee One' }]);
 		expect(result.meta.events_returned).toBe(1);
 		expect(result.meta.include_invitees).toBe(true);
 		expect(result.meta.invitee_hydration).toBeDefined();
@@ -152,8 +152,8 @@ describe('scanTeamEvents', () => {
 		);
 
 		expect(result.collection).toHaveLength(2);
-		expect(result.collection[0].invitee_count).toBe(1);
-		expect(result.collection[1].invitee_count).toBe(4);
+		expect(result.collection[0]?.invitee_count).toBe(1);
+		expect(result.collection[1]?.invitee_count).toBe(4);
 	});
 
 	test('supplements current memberships with organization events so former-member history is still returned', async () => {
@@ -187,8 +187,8 @@ describe('scanTeamEvents', () => {
 
 		expect(orgEventCalls).toBe(1);
 		expect(result.collection).toHaveLength(1);
-		expect(result.collection[0].event.name).toBe('Former Member Demo');
-		expect(result.collection[0].member.user_name).toBe('Former or unknown member');
+		expect(result.collection[0]?.event.name).toBe('Former Member Demo');
+		expect(result.collection[0]?.member.user_name).toBe('Former or unknown member');
 	});
 
 	test('skips the org-wide rescan after a complete unfiltered member scan in normal cases', async () => {
@@ -230,7 +230,7 @@ describe('scanTeamEvents', () => {
 
 		expect(orgEventCalls).toBe(0);
 		expect(result.collection).toHaveLength(1);
-		expect(result.collection[0].event.name).toBe('Current Member Demo');
+		expect(result.collection[0]?.event.name).toBe('Current Member Demo');
 	});
 
 	test('keeps the org-wide supplement when membership scanning is truncated, with a conservative attribution label', async () => {
@@ -340,8 +340,8 @@ describe('scanTeamEvents', () => {
 		expect(memberEventCalls).toBe(0);
 		expect(orgEventCalls).toBe(1);
 		expect(result.collection).toHaveLength(1);
-		expect(result.collection[0].event.name).toBe('Departed Rep Demo');
-		expect(result.collection[0].member.user_name).toBe('Former or unknown member');
+		expect(result.collection[0]?.event.name).toBe('Departed Rep Demo');
+		expect(result.collection[0]?.member.user_name).toBe('Former or unknown member');
 	});
 
 	test('de-duplicates shared events returned from multiple member calendars', async () => {
@@ -383,9 +383,9 @@ describe('scanTeamEvents', () => {
 
 		expect(result.collection).toHaveLength(1);
 		expect(result.meta.events_returned).toBe(1);
-		expect(result.collection[0].member.user_email).toBe('a@example.com');
-		expect(result.collection[0].members.map((member) => member.user_email)).toEqual(['a@example.com', 'b@example.com']);
-		expect(result.collection[0].event.uuid).toBe('E-shared');
+		expect(result.collection[0]?.member.user_email).toBe('a@example.com');
+		expect(result.collection[0]?.members.map((member) => member.user_email)).toEqual(['a@example.com', 'b@example.com']);
+		expect(result.collection[0]?.event.uuid).toBe('E-shared');
 	});
 
 	test('filters by member email and event type name', async () => {
@@ -441,8 +441,8 @@ describe('scanTeamEvents', () => {
 
 		expect(eventCalls).toBe(1);
 		expect(result.collection).toHaveLength(1);
-		expect(result.collection[0].member.user_email).toBe('b@example.com');
-		expect(result.collection[0].event.name).toBe('Demo Review');
+		expect(result.collection[0]?.member.user_email).toBe('b@example.com');
+		expect(result.collection[0]?.event.name).toBe('Demo Review');
 		expect(result.meta.events_returned).toBe(1);
 	});
 
@@ -524,7 +524,7 @@ describe('scanTeamEvents', () => {
 
 		expect(eventCalls).toBe(1);
 		expect(result.collection).toHaveLength(1);
-		expect(result.collection[0].event.name).toBe('Prefiltered Demo');
+		expect(result.collection[0]?.event.name).toBe('Prefiltered Demo');
 	});
 
 	test('forwards computed page size so later sparse-match pages are still scanned', async () => {
@@ -586,7 +586,7 @@ describe('scanTeamEvents', () => {
 		expect(pageSizes).toEqual([20, 20]);
 		expect(pageTokens).toEqual([undefined, 'page-2']);
 		expect(result.collection).toHaveLength(1);
-		expect(result.collection[0].event.name).toBe('Demo Review');
+		expect(result.collection[0]?.event.name).toBe('Demo Review');
 		expect(result.meta.event_pages_scanned).toBe(2);
 	});
 
@@ -702,8 +702,8 @@ describe('scanTeamEvents', () => {
 
 		expect(inviteeCalls).toBe(2);
 		expect(result.collection).toHaveLength(2);
-		expect(result.collection[0].invitees).toEqual([{ email: 'e1@example.com' }]);
-		expect(result.collection[1].invitees).toEqual([{ email: 'e2@example.com' }]);
+		expect(result.collection[0]?.invitees).toEqual([{ email: 'e1@example.com' }]);
+		expect(result.collection[1]?.invitees).toEqual([{ email: 'e2@example.com' }]);
 		expect(result.meta.invitee_hydration).toMatchObject({
 			fetches_used: 2,
 			max_fetches: 2,

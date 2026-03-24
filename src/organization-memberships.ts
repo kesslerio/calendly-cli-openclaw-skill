@@ -12,7 +12,7 @@ export interface MembershipQueryEnv {
 
 export function buildOrganizationMembershipParams(
   input: MembershipQueryInput,
-  env: MembershipQueryEnv = process.env,
+  env: MembershipQueryEnv = process.env as MembershipQueryEnv,
 ): URLSearchParams {
   const userUri = input.user_uri ?? env.CALENDLY_USER_URI;
   const organizationUri = input.organization_uri ?? env.CALENDLY_ORGANIZATION_URI;

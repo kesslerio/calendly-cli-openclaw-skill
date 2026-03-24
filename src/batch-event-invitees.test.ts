@@ -80,7 +80,7 @@ describe('fetchBatchEventInvitees', () => {
 		);
 
 		expect(result.collection.map((entry) => entry.event_uuid)).toEqual(['evt-2', 'evt-1']);
-		expect(result.collection[0].invitees).toEqual([{ email: 'evt-2@example.com' }]);
+		expect(result.collection[0]?.invitees).toEqual([{ email: 'evt-2@example.com' }]);
 		expect(result.meta).toEqual({
 			requested: 2,
 			processed: 2,
@@ -111,11 +111,11 @@ describe('fetchBatchEventInvitees', () => {
 			}
 		);
 
-		expect(result.collection[0].error).toEqual({
+		expect(result.collection[0]?.error).toEqual({
 			message: 'timeout',
 			reason: 'invitee_fetch_failed',
 		});
-		expect(result.collection[1].invitees).toEqual([{ email: 'good@example.com' }]);
+		expect(result.collection[1]?.invitees).toEqual([{ email: 'good@example.com' }]);
 		expect(result.meta.processed).toBe(1);
 		expect(result.meta.failed).toBe(1);
 	});
@@ -140,8 +140,8 @@ describe('fetchBatchEventInvitees', () => {
 
 		expect(result.meta.truncated).toBe(true);
 		expect(result.meta.fetches_used).toBe(1);
-		expect(result.collection[0].meta.truncated).toBe(true);
-		expect(result.collection[1].error).toEqual({
+		expect(result.collection[0]?.meta.truncated).toBe(true);
+		expect(result.collection[1]?.error).toEqual({
 			message: 'max_invitee_fetches reached before event could be processed',
 			reason: 'max_invitee_fetches_reached',
 		});

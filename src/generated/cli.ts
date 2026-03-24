@@ -635,7 +635,7 @@ const commandSignatures: Record<string, string> = {
   "list-organization-memberships": "function list_organization_memberships(user_uri?: string, organization_uri?: string, email?: string, count?: number);"
 };
 program.configureHelp({
-	commandTerm(cmd) {
+	subcommandTerm(cmd: Command) {
 		const term = cmd.name();
 		return commandSignatures[term] ?? cmd.name();
 	},
@@ -825,7 +825,7 @@ async function resolveInviteeUuidFromEvent(
 		const uuids = collection
 			.map((entry) => extractInviteeUuid(entry))
 			.filter((value): value is string => typeof value === 'string' && value.length > 0);
-		return [...new Set(uuids)];
+		return Array.from(new Set(uuids));
 	};
 
 	const activeInvitees = await fetchEventInviteesPage(apiKey, eventUuid, timeout, undefined, {
