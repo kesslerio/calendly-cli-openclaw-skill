@@ -23,6 +23,8 @@ const HANDWRITTEN_COMMANDS = new Set([
 	'list_event_types',
 	'get-event-type',
 	'get_event_type',
+	'update-event-type',
+	'update_event_type',
 	'get-event-type-availability',
 	'get_event_type_availability',
 	'get-event',
@@ -121,25 +123,36 @@ async function registerHandwrittenCommands(program: ReturnType<typeof createProg
 
 export async function runCli(): Promise<void> {
 	const command = detectCommand(process.argv);
-	const isGlobalHelp = command === 'help' || !command || hasHelpFlag(process.argv);
+	const wantsHelp = hasHelpFlag(process.argv);
+	const isGlobalHelp =
+		command === 'help' || !command || (wantsHelp && (command.startsWith('-') || !HANDWRITTEN_COMMANDS.has(command)));
+	if (isGlobalHelp) {
+		const program = createProgram();
+		try {
+			await registerHandwrittenCommands(program);
+			program.outputHelp();
+			return;
+		} catch {
+			try {
+				const { runCli: runGeneratedCli } = await import('../generated/cli');
+				await runGeneratedCli();
+				return;
+			} catch {
+				program.outputHelp();
+				console.error('\nNote: Full command set is unavailable because generated CLI dependencies are missing.');
+				console.error('Install runtime deps (e.g. mcporter) to restore all generated commands.');
+				return;
+			}
+		}
+	}
+
 	if (!command || command.startsWith('-') || !HANDWRITTEN_COMMANDS.has(command)) {
 		try {
 			const { runCli: runGeneratedCli } = await import('../generated/cli');
 			await runGeneratedCli();
 			return;
 		} catch (error) {
-			if (!isGlobalHelp) {
-				throw error;
-			}
-			const program = createProgram();
-			try {
-				await registerHandwrittenCommands(program);
-			} catch {
-				// Keep global help reachable even when handwritten command modules cannot load.
-			}
-			program.outputHelp();
-			console.error('\nNote: Full command set is unavailable because generated CLI dependencies are missing.');
-			console.error('Install runtime deps (e.g. mcporter) to restore all generated commands.');
+			throw error;
 		}
 		return;
 	}

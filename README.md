@@ -157,6 +157,44 @@ Validation rules:
 Validation rules:
 - `--event-type-uri` is required (also enforced for `--raw` JSON).
 
+### Update Event Type
+
+```bash
+./calendly update-event-type \
+  --event-type-uri "https://api.calendly.com/event_types/<EVENT_TYPE_UUID>" \
+  --duration 30 \
+  --active true \
+  -o json
+```
+
+Dry-run example:
+
+```bash
+./calendly update-event-type \
+  --event-type-uuid "<EVENT_TYPE_UUID>" \
+  --description "Updated invitee-facing description" \
+  --dry-run \
+  -o json
+```
+
+Validation and behavior:
+- requires an identifier via `--event-type-uri` or `--event-type-uuid`
+- `--event-type-uri` is the primary identifier; `--event-type-uuid` is a compatibility alias
+- when both identifier forms are provided, they must refer to the same event type
+- supports patching only provided fields: `--name`, `--description`, `--duration`, `--active`, `--secret`
+- at least one mutable field is required; identifier-only calls fail fast
+- `--duration` must be an integer between 15 and 480
+- `--active` and `--secret` require explicit `true` or `false`
+- `--dry-run` returns the normalized patch payload without sending MCP or REST requests
+- `--raw` JSON supports `event_type_uri` and `event_type_uuid`; unknown write fields are ignored
+
+Response shape:
+- `query.event_type_uri`
+- `query.event_type_uuid`
+- `meta.changed_fields`
+- `meta.dry_run`
+- `resource` with updated event type details, or `null` for dry-run
+
 ### Schedule Event
 
 ```bash
@@ -276,6 +314,7 @@ Signing secret handling guidance:
 - `get-event` - Get event details
 - `list-event-types` - List available event types for scheduling (requires at least one of `--user-uri` or `--organization-uri`)
 - `get-event-type` - Get details for a specific event type (requires `--event-type-uri`)
+- `update-event-type` - Update mutable event type metadata (`--event-type-uri` primary, `--event-type-uuid` alias, supports `--dry-run`)
 - `get-event-type-availability` - Get available time slots for a specific event type
 - `schedule-event` - Schedule a meeting for an invitee on an organizer's event type
 - `reschedule-event` - Reschedule an existing scheduled event to a new start time
@@ -319,6 +358,7 @@ Then use in conversations:
 
 - `schedule-event` requires a paid Calendly plan (Standard or higher). Free plans receive `403`.
 - `reschedule-event` requires paid-plan API access and can fail with clear messages for invalid identifiers, unavailable target slots, or payload validation.
+- `update-event-type` mutates Calendly configuration. Use `--dry-run` first, then validate against a disposable test event type and revert the changed field after smoke testing.
 - Safe error messages are returned for common failures: invalid event type, unavailable slot, custom question validation, and plan restrictions.
 - For the most reliable bookings, fetch slots first via `get-event-type-availability` and then schedule exactly one returned `start_time`.
 
