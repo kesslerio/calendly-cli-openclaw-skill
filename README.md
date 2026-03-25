@@ -15,12 +15,21 @@ Moltbot skill for Calendly integration. List events, check availability, manage 
 
 ```bash
 # Clone the repo
-git clone https://github.com/kesslerio/calendly-moltbot-skill.git
-cd calendly-moltbot-skill
+git clone https://github.com/kesslerio/calendly-cli-openclaw-skill.git
+cd calendly-cli-openclaw-skill
 
-# The CLI is self-contained (generated via mcporter from MCP server)
-chmod +x calendly
+# Install the launcher on PATH
+bun run install:path
+
+# If needed, add ~/.local/bin to PATH
+export PATH="$HOME/.local/bin:$PATH"
+
+# Verify the install
+command -v calendly
+calendly --help
 ```
+
+The installer creates `~/.local/bin/calendly` by default. Override the target dir with `bun run install:path -- --bin-dir /your/bin/dir`.
 
 ## Configuration
 
@@ -37,13 +46,13 @@ Get your token from: https://calendly.com/integrations/api_webhooks
 ### Get Your Profile
 
 ```bash
-./calendly get-current-user
+calendly get-current-user
 ```
 
 ### List Events
 
 ```bash
-./calendly list-events \
+calendly list-events \
   --user-uri "<YOUR_USER_URI>" \
   --min-start-time "2026-01-20T00:00:00Z" \
   --max-start-time "2026-01-27T23:59:59Z"
@@ -52,7 +61,7 @@ Get your token from: https://calendly.com/integrations/api_webhooks
 ### List Events with Invitees (Single Call)
 
 ```bash
-./calendly list-events --status active --include-invitees
+calendly list-events --status active --include-invitees
 ```
 
 This command first fetches events with Calendly `expand=invitees`. When Calendly reports `invitees_counter.active > 0` but embedded `invitees` are missing/empty, CLI falls back to `scheduled_events/{event_uuid}/invitees` for those events.
@@ -61,7 +70,7 @@ Fallback controls:
 - `--max-invitee-fetches <number>`: hard cap for fallback invitee fetch calls (default: `25`)
 
 Response metadata includes `meta.invitee_hydration` with fallback usage and truncation signals such as `truncated`, `events_skipped_due_to_cap`, and `truncation_reason`.
-Backward-compatible alias still works: `./calendly list-events-with-invitees --status active`.
+Backward-compatible alias still works: `calendly list-events-with-invitees --status active`.
 
 Date-range validation rules for `list-events`, `list-events-with-invitees`, `search-invitees`, and `search-team`:
 - `--min-start-time` and `--max-start-time` must be ISO-8601 timestamps (example: `2026-01-20T00:00:00Z`)
@@ -71,7 +80,7 @@ Date-range validation rules for `list-events`, `list-events-with-invitees`, `sea
 ### Search Invitees by Email
 
 ```bash
-./calendly search-invitees --email "person@example.com" --organization-uri "<YOUR_ORG_URI>"
+calendly search-invitees --email "person@example.com" --organization-uri "<YOUR_ORG_URI>"
 ```
 
 Supports pagination with `--page-size` and `--max-pages` for large orgs.
@@ -79,7 +88,7 @@ Supports pagination with `--page-size` and `--max-pages` for large orgs.
 ### Search Team Calendars by Invitee Email
 
 ```bash
-./calendly search-team --email "person@example.com" --organization-uri "<YOUR_ORG_URI>" --count 25 --max-membership-pages 10
+calendly search-team --email "person@example.com" --organization-uri "<YOUR_ORG_URI>" --count 25 --max-membership-pages 10
 ```
 
 This command resolves team members from organization memberships, scans each member's events in bounded pages, and returns matching events with member context.
@@ -88,7 +97,7 @@ This command resolves team members from organization memberships, scans each mem
 ### List Team Events
 
 ```bash
-./calendly list-team-events \
+calendly list-team-events \
   --organization-uri "<YOUR_ORG_URI>" \
   --min-start-time "2026-01-20T00:00:00Z" \
   --max-start-time "2026-01-27T23:59:59Z" \
@@ -102,7 +111,7 @@ Use `--include-invitees` when you want invitee details in the same response.
 ### Batch Invitee Lookup by Event URI
 
 ```bash
-./calendly batch-event-invitees \
+calendly batch-event-invitees \
   --event-uri "https://api.calendly.com/scheduled_events/<EVENT_UUID_1>" \
   --event-uri "https://api.calendly.com/scheduled_events/<EVENT_UUID_2>" \
   --max-invitee-fetches 25
@@ -118,7 +127,7 @@ Supports repeated `--event-uri` flags plus `--raw` JSON (`event_uri` or `event_u
 ### Get Event Type Availability
 
 ```bash
-./calendly get-event-type-availability \
+calendly get-event-type-availability \
   --event-type-uri "https://api.calendly.com/event_types/<EVENT_TYPE_UUID>" \
   --start-time "2026-03-01T00:00:00Z" \
   --end-time "2026-03-02T00:00:00Z" \
@@ -136,7 +145,7 @@ Validation rules:
 ### List Event Types
 
 ```bash
-./calendly list-event-types \
+calendly list-event-types \
   --organization-uri "https://api.calendly.com/organizations/<ORG_UUID>" \
   --count 20 \
   -o json
@@ -149,7 +158,7 @@ Validation rules:
 ### Get Event Type Details
 
 ```bash
-./calendly get-event-type \
+calendly get-event-type \
   --event-type-uri "https://api.calendly.com/event_types/<EVENT_TYPE_UUID>" \
   -o json
 ```
@@ -160,7 +169,7 @@ Validation rules:
 ### Update Event Type
 
 ```bash
-./calendly update-event-type \
+calendly update-event-type \
   --event-type-uri "https://api.calendly.com/event_types/<EVENT_TYPE_UUID>" \
   --duration 30 \
   --active true \
@@ -170,7 +179,7 @@ Validation rules:
 Dry-run example:
 
 ```bash
-./calendly update-event-type \
+calendly update-event-type \
   --event-type-uuid "<EVENT_TYPE_UUID>" \
   --description "Updated invitee-facing description" \
   --dry-run \
@@ -198,7 +207,7 @@ Response shape:
 ### Schedule Event
 
 ```bash
-./calendly schedule-event \
+calendly schedule-event \
   --event-type "https://api.calendly.com/event_types/<EVENT_TYPE_UUID>" \
   --start-time "2099-03-01T15:00:00Z" \
   --invitee-email "invitee@example.com" \
@@ -232,7 +241,7 @@ Response includes normalized booking details when available:
 ### Reschedule Event
 
 ```bash
-./calendly reschedule-event \
+calendly reschedule-event \
   --event-uuid "<EVENT_UUID>" \
   --new-start-time "2099-03-02T16:00:00Z" \
   --reason "Conflict with another meeting" \
@@ -261,20 +270,20 @@ Response includes normalized reschedule details when available:
 ### Get Event Details
 
 ```bash
-./calendly get-event --event-uuid "<EVENT_UUID>"
+calendly get-event --event-uuid "<EVENT_UUID>"
 ```
 
 ### Cancel Event
 
 ```bash
-./calendly cancel-event --event-uuid "<EVENT_UUID>" --reason "Rescheduling needed"
+calendly cancel-event --event-uuid "<EVENT_UUID>" --reason "Rescheduling needed"
 ```
 
 ### Webhook Subscriptions
 
 ```bash
 # Create
-./calendly create-webhook-subscription \
+calendly create-webhook-subscription \
   --url "https://example.com/calendly/webhooks" \
   --events "invitee.created,invitee.canceled" \
   --organization-uri "https://api.calendly.com/organizations/<ORG_UUID>" \
@@ -282,15 +291,15 @@ Response includes normalized reschedule details when available:
   --signing-key "$CALENDLY_WEBHOOK_SIGNING_KEY"
 
 # List
-./calendly list-webhook-subscriptions \
+calendly list-webhook-subscriptions \
   --organization-uri "https://api.calendly.com/organizations/<ORG_UUID>"
 
 # Get
-./calendly get-webhook-subscription \
+calendly get-webhook-subscription \
   --webhook-subscription-uri "https://api.calendly.com/webhook_subscriptions/<SUBSCRIPTION_UUID>"
 
 # Delete
-./calendly delete-webhook-subscription \
+calendly delete-webhook-subscription \
   --webhook-subscription-uri "https://api.calendly.com/webhook_subscriptions/<SUBSCRIPTION_UUID>"
 ```
 
@@ -388,7 +397,7 @@ EOF
 MCPORTER_CONFIG=./mcporter.json npx mcporter@latest generate-cli --server calendly --output src/generated/cli.ts
 ```
 
-The public `./calendly` launcher stays stable and loads the handwritten `src/cli.ts` composition entrypoint, which in turn imports the generated `src/generated/cli.ts` artifact.
+The repo ships a stable `calendly` launcher. Symlink it into `~/.local/bin/calendly` to make the command available on PATH, and it will load the handwritten `src/cli.ts` composition entrypoint, which in turn imports the generated `src/generated/cli.ts` artifact.
 
 ## License
 

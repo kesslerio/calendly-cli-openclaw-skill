@@ -12,6 +12,11 @@ Interact with Calendly scheduling via MCP-generated CLI.
 ## Quick Start
 
 ```bash
+# Make the launcher available on PATH
+bun run install:path
+export PATH="$HOME/.local/bin:$PATH"
+command -v calendly
+
 # Get your Calendly profile (returns user URI)
 calendly get-current-user
 
@@ -27,6 +32,9 @@ calendly get-event --event-uuid <UUID>
 # Cancel an event
 calendly cancel-event --event-uuid <UUID> --reason "Rescheduling needed"
 ```
+
+Default install target: `~/.local/bin/calendly`.
+Override it with `bun run install:path -- --bin-dir /your/bin/dir`.
 
 ## Available Commands
 

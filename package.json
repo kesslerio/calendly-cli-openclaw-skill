@@ -1,6 +1,12 @@
 {
   "name": "calendly-cli-openclaw-skill",
+  "bin": {
+    "calendly": "./calendly"
+  },
   "module": "index.ts",
+  "scripts": {
+    "install:path": "bun run ./scripts/install-path.ts"
+  },
   "type": "module",
   "private": true,
   "devDependencies": {
