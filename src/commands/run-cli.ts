@@ -145,8 +145,8 @@ export function rewriteHelpArgv(argv: string[], helpTarget: string | undefined):
 	return rewritten;
 }
 
-function hasHelpFlag(argv: string[]): boolean {
-	return argv.slice(2).some((token) => token === '-h' || token === '--help' || token === 'help');
+export function hasHelpOption(argv: string[]): boolean {
+	return argv.slice(2).some((token) => token === '-h' || token === '--help');
 }
 
 export function shouldShowGlobalHelp(command: string | undefined, helpTarget?: string | undefined): boolean {
@@ -225,6 +225,9 @@ async function runGeneratedCliWithInterceptedExit(): Promise<void> {
 	const originalExitCode = process.exitCode;
 	const interceptedExit = ((code?: string | number | null | undefined): never => {
 		const normalizedCode = typeof code === 'number' ? code : Number.parseInt(String(code ?? 0), 10) || 0;
+		if (normalizedCode !== 0) {
+			return originalExit(normalizedCode);
+		}
 		throw new InterceptedExit(normalizedCode);
 	}) as typeof process.exit;
 
@@ -256,7 +259,7 @@ export async function runCli(): Promise<void> {
 	const helpTarget = detectHelpTarget(process.argv);
 	const argv = command === 'help' ? rewriteHelpArgv(process.argv, helpTarget) : [...process.argv];
 	const routedCommand = command === 'help' ? helpTarget : command;
-	const wantsHelp = hasHelpFlag(process.argv);
+	const wantsHelp = command === 'help' || hasHelpOption(process.argv);
 	const isGlobalHelp = shouldShowGlobalHelp(command, helpTarget);
 	if (isGlobalHelp) {
 		try {

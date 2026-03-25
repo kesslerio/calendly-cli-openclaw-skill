@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { detectCommand, detectHelpTarget, rewriteHelpArgv, shouldShowGlobalHelp } from './run-cli';
+import { detectCommand, detectHelpTarget, hasHelpOption, rewriteHelpArgv, shouldShowGlobalHelp } from './run-cli';
 
 describe('detectCommand', () => {
 	test('detects handwritten commands after global flags', () => {
@@ -44,6 +44,27 @@ describe('detectHelpTarget', () => {
 		expect(detectHelpTarget(['bun', 'calendly', '-o', 'json', 'help', 'create-event-type'])).toBe(
 			'create-event-type'
 		);
+	});
+});
+
+describe('hasHelpOption', () => {
+	test('recognizes explicit help flags', () => {
+		expect(hasHelpOption(['bun', 'calendly', '--help'])).toBe(true);
+		expect(hasHelpOption(['bun', 'calendly', 'update-event-type', '--help'])).toBe(true);
+	});
+
+	test('does not treat normal argument values as help requests', () => {
+		expect(
+			hasHelpOption([
+				'bun',
+				'calendly',
+				'update-event-type',
+				'--event-type-uuid',
+				'ET_123',
+				'--description',
+				'help',
+			])
+		).toBe(false);
 	});
 });
 
