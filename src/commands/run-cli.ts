@@ -19,6 +19,8 @@ const HANDWRITTEN_COMMANDS = new Set([
 	'exchange_code_for_tokens',
 	'refresh-access-token',
 	'refresh_access_token',
+	'create-event-type',
+	'create_event_type',
 	'list-event-types',
 	'list_event_types',
 	'get-event-type',
@@ -171,6 +173,9 @@ function isMissingGeneratedCliDependency(error: unknown): boolean {
 
 function printHandwrittenHelpAddendum(): void {
 	console.log('\nHandwritten extensions:');
+	console.log(
+		'  create-event-type (--user-uri <user-uri> | --team-uri <team-uri> | --raw <json>) --name <name> [--duration <duration:number>] [--duration-option <duration-option:number>] [--active <active:boolean>] [--description <description>] [--color <color>] [--locale <locale>] [--location-kind <location-kind>] [--location <location>] [--location-additional-info <location-additional-info>] [--location-phone-number <location-phone-number>]'
+	);
 	console.log(
 		'  update-event-type (--event-type-uri <event-type-uri> | --event-type-uuid <event-type-uuid>) [--name <name>] [--description <description>] [--duration <duration:number>] [--active <active:boolean>] [--secret <secret:boolean>] [--dry-run] [--raw <json>]'
 	);

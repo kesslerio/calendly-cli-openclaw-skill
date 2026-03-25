@@ -19,6 +19,8 @@ const commandSignatures: Record<string, string> = {
 	'get-oauth-url': 'function get_oauth_url(redirect_uri: string, state?: string);',
 	'exchange-code-for-tokens': 'function exchange_code_for_tokens(code: string, redirect_uri: string);',
 	'refresh-access-token': 'function refresh_access_token(refresh_token: string);',
+	'create-event-type':
+		'function create_event_type(owner: string, name: string, duration?: number, duration_options?: number[], active?: boolean, description?: string, locations?: { kind: string, location?: string, additional_info?: string, phone_number?: string }[], color?: string, locale?: "de" | "en" | "es" | "fr" | "it" | "nl" | "pt" | "uk");',
 	'list-event-types': 'function list_event_types(user?: string, organization?: string, count?: number);',
 	'get-event-type': 'function get_event_type(event_type: string);',
 	'update-event-type':

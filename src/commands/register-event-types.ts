@@ -1,5 +1,12 @@
 import { createCallResult } from 'mcporter';
 import { Command } from 'commander';
+import {
+	normalizeCreateEventTypeQuery,
+	shapeCreateEventTypeResult,
+	toCreateEventTypeMcpArgs,
+	toCreateEventTypeRestBody,
+	toSafeCreateEventTypeError,
+} from '../create-event-type';
 import { normalizeEventTypeAvailabilityQuery, shapeEventTypeAvailabilityResult } from '../event-type-availability';
 import { extractEventTypeUuid, normalizeGetEventTypeQuery, shapeGetEventTypeResult } from '../get-event-type';
 import { normalizeListEventTypesQuery, shapeListEventTypesResult, toListEventTypesMcpArgs } from '../list-event-types';
@@ -39,6 +46,10 @@ function parseBooleanFlag(value: string, optionName: string): boolean {
 		return false;
 	}
 	throw new Error(`Invalid ${optionName} value "${value}". Use true or false.`);
+}
+
+function collectIntegerFlag(value: string, previous: number[] | undefined, optionName: string): number[] {
+	return [...(previous ?? []), parseIntegerFlag(value, optionName)];
 }
 
 async function calendlyRequest(
@@ -140,7 +151,104 @@ async function fetchUpdateEventTypeResult(query: Record<string, unknown>, timeou
 	return shapeUpdateEventTypeResult(data as Record<string, unknown>, query as any);
 }
 
+async function fetchCreateEventTypeResult(query: Record<string, unknown>, timeout: number): Promise<unknown> {
+	const apiKey = requireApiKey();
+	const data = await calendlyRequest('https://api.calendly.com/event_types', apiKey, timeout, {
+		method: 'POST',
+		body: JSON.stringify(toCreateEventTypeRestBody(query as any)),
+	});
+	return shapeCreateEventTypeResult(data as Record<string, unknown>, query as any);
+}
+
 export function registerEventTypeCommands(program: Command): void {
+	program
+		.command('create-event-type')
+		.summary(
+			'create-event-type (--user-uri <user-uri> | --team-uri <team-uri> | --raw <json>) --name <name> [--duration <duration:number>] [--duration-option <duration-option:number>] [--active <active:boolean>] [--description <description>] [--color <color>] [--locale <locale>] [--location-kind <location-kind>] [--location <location>] [--location-additional-info <location-additional-info>] [--location-phone-number <location-phone-number>]'
+		)
+		.description('Create a new solo event type')
+		.usage(
+			'(--user-uri <user-uri> | --team-uri <team-uri> | --raw <json>) --name <name> [--duration <duration:number>] [--duration-option <duration-option:number>] [--active <active:boolean>] [--description <description>] [--color <color>] [--locale <locale>] [--location-kind <location-kind>] [--location <location>] [--location-additional-info <location-additional-info>] [--location-phone-number <location-phone-number>]'
+		)
+		.option('--raw <json>', 'Provide raw JSON arguments to the tool, bypassing flag parsing.')
+		.option('--user-uri <user-uri>', 'User URI to use as the event type owner')
+		.option('--team-uri <team-uri>', 'Team URI to use as the event type owner')
+		.option('--name <name>', 'Event type display name')
+		.option('--duration <duration:number>', 'Primary event duration in minutes (1-720)', (value) => parseIntegerFlag(value, 'duration'))
+		.option(
+			'--duration-option <duration-option:number>',
+			'Allowed duration option in minutes (repeat up to 4 times)',
+			(value, previous: number[] | undefined) => collectIntegerFlag(value, previous, 'duration-option'),
+			[]
+		)
+		.option('--active <active:boolean>', 'Whether the event type is active (true or false)', (value) => parseBooleanFlag(value, 'active'))
+		.option('--description <description>', 'Invitee-facing event type description')
+		.option('--color <color>', 'Scheduling page brand color in hex format (example: #fff200)')
+		.option('--locale <locale>', 'Scheduling page locale (de|en|es|fr|it|nl|pt|uk)')
+		.option('--location-kind <location-kind>', 'Single location kind to attach to the event type')
+		.option('--location <location>', 'Single location value such as a physical address or custom label')
+		.option('--location-additional-info <location-additional-info>', 'Additional location details for the single location entry')
+		.option('--location-phone-number <location-phone-number>', 'Phone number for inbound/outbound call locations')
+		.alias('create_event_type')
+		.action(async (cmdOpts) => {
+			const globalOptions = program.opts();
+			const timeout = globalOptions.timeout || 30000;
+			const rawArgs = cmdOpts.raw ? JSON.parse(cmdOpts.raw) : ({} as Record<string, unknown>);
+			let query: Record<string, unknown>;
+			try {
+				query = normalizeCreateEventTypeQuery(cmdOpts, rawArgs) as unknown as Record<string, unknown>;
+			} catch (error) {
+				console.error(`Error: ${toSafeCreateEventTypeError(error)}`);
+				process.exit(1);
+				return;
+			}
+
+			let mcpResult: unknown;
+			let mcpErrorMessage: string | undefined;
+			try {
+				const runtime = await ensureRuntime();
+				const proxy = getServerProxy(runtime) as any;
+				try {
+					const call = proxy.createEventType(toCreateEventTypeMcpArgs(query as any));
+					mcpResult = await invokeWithTimeout(call, timeout);
+					const mcpRaw = createCallResult(mcpResult).raw as Record<string, unknown> | undefined;
+					if (mcpRaw) {
+						const shaped = shapeCreateEventTypeResult(mcpRaw, query as any);
+						if (shaped.resource) {
+							printResult(shaped, globalOptions.output ?? 'text');
+							return;
+						}
+					}
+					printMcpResult(mcpResult, globalOptions.output ?? 'text');
+					return;
+				} catch (error) {
+					mcpErrorMessage = error instanceof Error ? error.message : String(error);
+				} finally {
+					await runtime.close(SERVER_NAME).catch(() => {});
+				}
+			} catch (error) {
+				mcpErrorMessage = error instanceof Error ? error.message : String(error);
+			}
+
+			try {
+				const restResult = await fetchCreateEventTypeResult(query, timeout);
+				printResult(restResult, globalOptions.output ?? 'text');
+			} catch (error) {
+				let message = toSafeCreateEventTypeError(error);
+				if (mcpErrorMessage) {
+					message = `${message} (MCP tool fallback failed: ${mcpErrorMessage})`;
+				}
+				console.error(`Error: ${message}`);
+				process.exit(1);
+			}
+		})
+		.addHelpText(
+			'after',
+			() =>
+				'\nExample:\n  ' +
+				'./calendly create-event-type --user-uri https://api.calendly.com/users/USER_123 --name "CLI Smoke Test" --duration 30 --active false --location-kind zoom_conference'
+		);
+
 	program
 		.command('list-event-types')
 		.summary('list-event-types (--user-uri <user-uri> | --organization-uri <organization-uri>) [--count <count:number>] [--raw <json>]')
