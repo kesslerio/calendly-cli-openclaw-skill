@@ -136,6 +136,24 @@ describe('normalizeCreateEventTypeQuery', () => {
 		).toThrow('owner must be a Calendly user or team URI');
 	});
 
+	test('rejects mismatched user and team flag URI types', () => {
+		expect(() =>
+			normalizeCreateEventTypeQuery({
+				userUri: 'https://api.calendly.com/teams/TEAM_123',
+				name: 'Bad User Flag',
+				duration: 30,
+			})
+		).toThrow('user_uri must be a Calendly user URI');
+
+		expect(() =>
+			normalizeCreateEventTypeQuery({
+				teamUri: 'https://api.calendly.com/users/USER_123',
+				name: 'Bad Team Flag',
+				duration: 30,
+			})
+		).toThrow('team_uri must be a Calendly team URI');
+	});
+
 	test('rejects missing duration sources', () => {
 		expect(() =>
 			normalizeCreateEventTypeQuery({

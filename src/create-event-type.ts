@@ -210,10 +210,23 @@ function normalizeOwnerUri(value: unknown, fieldName: 'owner' | 'user_uri' | 'te
 	if (!owner) {
 		return undefined;
 	}
-	if (owner.startsWith(USER_URI_PREFIX) || owner.startsWith(TEAM_URI_PREFIX)) {
-		return owner;
+	switch (fieldName) {
+		case 'owner':
+			if (owner.startsWith(USER_URI_PREFIX) || owner.startsWith(TEAM_URI_PREFIX)) {
+				return owner;
+			}
+			throw new Error('owner must be a Calendly user or team URI');
+		case 'user_uri':
+			if (owner.startsWith(USER_URI_PREFIX)) {
+				return owner;
+			}
+			throw new Error('user_uri must be a Calendly user URI');
+		case 'team_uri':
+			if (owner.startsWith(TEAM_URI_PREFIX)) {
+				return owner;
+			}
+			throw new Error('team_uri must be a Calendly team URI');
 	}
-	throw new Error(`${fieldName} must be a Calendly user or team URI`);
 }
 
 function normalizeFlagLocation(
@@ -399,7 +412,9 @@ export function toSafeCreateEventTypeError(error: unknown): string {
 			message.includes('location_kind must be one of') ||
 			message.includes('location_kind is required when providing location details') ||
 			message.includes('locations entries require a supported kind value') ||
-			message.includes('must be a Calendly user or team URI')
+			message.includes('owner must be a Calendly user or team URI') ||
+			message.includes('user_uri must be a Calendly user URI') ||
+			message.includes('team_uri must be a Calendly team URI')
 	) {
 		return message;
 	}
