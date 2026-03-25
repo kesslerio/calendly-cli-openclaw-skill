@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { detectCommand, shouldShowGlobalHelp } from './run-cli';
+import { detectCommand, detectHelpTarget, rewriteHelpArgv, shouldShowGlobalHelp } from './run-cli';
 
 describe('detectCommand', () => {
 	test('detects handwritten commands after global flags', () => {
@@ -24,5 +24,47 @@ describe('shouldShowGlobalHelp', () => {
 	test('does not treat command-specific help as global help', () => {
 		expect(shouldShowGlobalHelp('update-event-type')).toBe(false);
 		expect(shouldShowGlobalHelp('create-event-type')).toBe(false);
+		expect(shouldShowGlobalHelp('help', 'schedule-event')).toBe(false);
+		expect(shouldShowGlobalHelp('help', 'create-event-type')).toBe(false);
+	});
+});
+
+describe('detectHelpTarget', () => {
+	test('returns undefined for bare help', () => {
+		expect(detectHelpTarget(['bun', 'calendly', 'help'])).toBeUndefined();
+	});
+
+	test('detects handwritten help targets after global flags', () => {
+		expect(detectHelpTarget(['bun', 'calendly', '-o', 'json', 'help', 'schedule-event'])).toBe(
+			'schedule-event'
+		);
+	});
+
+	test('detects generated help targets after global flags', () => {
+		expect(detectHelpTarget(['bun', 'calendly', '-o', 'json', 'help', 'create-event-type'])).toBe(
+			'create-event-type'
+		);
+	});
+});
+
+describe('rewriteHelpArgv', () => {
+	test('rewrites handwritten help targets into command --help form', () => {
+		expect(rewriteHelpArgv(['bun', 'calendly', '-o', 'json', 'help', 'schedule-event'], 'schedule-event')).toEqual([
+			'bun',
+			'calendly',
+			'-o',
+			'json',
+			'schedule-event',
+			'--help',
+		]);
+	});
+
+	test('rewrites generated help targets into command --help form', () => {
+		expect(rewriteHelpArgv(['bun', 'calendly', 'help', 'create-event-type'], 'create-event-type')).toEqual([
+			'bun',
+			'calendly',
+			'create-event-type',
+			'--help',
+		]);
 	});
 });

@@ -74,18 +74,99 @@ export function detectCommand(argv: string[]): string | undefined {
 	return undefined;
 }
 
+export function detectHelpTarget(argv: string[]): string | undefined {
+	let sawHelpCommand = false;
+	for (let index = 2; index < argv.length; index += 1) {
+		const token = argv[index];
+		if (!token) {
+			continue;
+		}
+		if (token === '--') {
+			return sawHelpCommand ? argv[index + 1] : undefined;
+		}
+		if (!token.startsWith('-')) {
+			if (!sawHelpCommand) {
+				sawHelpCommand = token === 'help';
+				continue;
+			}
+			return token;
+		}
+		if (
+			token === '-o' ||
+			token === '--output' ||
+			token === '-t' ||
+			token === '--timeout'
+		) {
+			if (argv[index + 1] !== undefined) {
+				index += 1;
+			}
+		}
+	}
+	return undefined;
+}
+
+export function rewriteHelpArgv(argv: string[], helpTarget: string | undefined): string[] {
+	if (!helpTarget) {
+		return [...argv];
+	}
+
+	const rewritten = argv.slice(0, 2);
+	let sawHelpCommand = false;
+
+	for (let index = 2; index < argv.length; index += 1) {
+		const token = argv[index];
+		if (!token) {
+			continue;
+		}
+		if (!sawHelpCommand) {
+			if (!token.startsWith('-')) {
+				sawHelpCommand = token === 'help';
+				if (sawHelpCommand) {
+					continue;
+				}
+			}
+			rewritten.push(token);
+			if (
+				(token === '-o' || token === '--output' || token === '-t' || token === '--timeout') &&
+				argv[index + 1] !== undefined
+			) {
+				rewritten.push(argv[index + 1]!);
+				index += 1;
+			}
+			continue;
+		}
+
+		if (token === helpTarget) {
+			rewritten.push(helpTarget, '--help');
+			break;
+		}
+	}
+
+	return rewritten;
+}
+
 function hasHelpFlag(argv: string[]): boolean {
 	return argv.slice(2).some((token) => token === '-h' || token === '--help' || token === 'help');
 }
 
-export function shouldShowGlobalHelp(command: string | undefined): boolean {
-	return command === 'help' || !command;
+export function shouldShowGlobalHelp(command: string | undefined, helpTarget?: string | undefined): boolean {
+	return !command || (command === 'help' && !helpTarget);
 }
 
 class InterceptedExit extends Error {
 	constructor(public readonly code: number) {
 		super(`Intercepted process.exit(${code})`);
 	}
+}
+
+function isMissingGeneratedCliDependency(error: unknown): boolean {
+	const message = error instanceof Error ? error.message : String(error);
+	return (
+		message.includes('Cannot find module') ||
+		message.includes('Cannot find package') ||
+		message.includes('ERR_MODULE_NOT_FOUND') ||
+		message.includes('generated CLI dependencies are missing')
+	);
 }
 
 function printHandwrittenHelpAddendum(): void {
@@ -160,16 +241,32 @@ async function runGeneratedCliWithInterceptedExit(): Promise<void> {
 	}
 }
 
+async function withProcessArgv<T>(argv: string[], callback: () => Promise<T>): Promise<T> {
+	const originalArgv = [...process.argv];
+	process.argv = [...argv];
+	try {
+		return await callback();
+	} finally {
+		process.argv = originalArgv;
+	}
+}
+
 export async function runCli(): Promise<void> {
 	const command = detectCommand(process.argv);
+	const helpTarget = detectHelpTarget(process.argv);
+	const argv = command === 'help' ? rewriteHelpArgv(process.argv, helpTarget) : [...process.argv];
+	const routedCommand = command === 'help' ? helpTarget : command;
 	const wantsHelp = hasHelpFlag(process.argv);
-	const isGlobalHelp = shouldShowGlobalHelp(command);
+	const isGlobalHelp = shouldShowGlobalHelp(command, helpTarget);
 	if (isGlobalHelp) {
 		try {
 			await runGeneratedCliWithInterceptedExit();
 			printHandwrittenHelpAddendum();
 			return;
-		} catch {
+		} catch (error) {
+			if (!isMissingGeneratedCliDependency(error)) {
+				throw error;
+			}
 			const program = createProgram();
 			try {
 				await registerHandwrittenCommands(program);
@@ -183,10 +280,12 @@ export async function runCli(): Promise<void> {
 		}
 	}
 
-	if (!command || !HANDWRITTEN_COMMANDS.has(command)) {
+	if (!routedCommand || !HANDWRITTEN_COMMANDS.has(routedCommand)) {
 		try {
 			const { runCli: runGeneratedCli } = await import('../generated/cli');
-			await runGeneratedCli();
+			await withProcessArgv(argv, async () => {
+				await runGeneratedCli();
+			});
 			return;
 		} catch (error) {
 			throw error;
@@ -197,7 +296,7 @@ export async function runCli(): Promise<void> {
 	const program = createProgram();
 	try {
 		await registerHandwrittenCommands(program);
-		await program.parseAsync(process.argv);
+		await program.parseAsync(argv);
 	} catch (error) {
 		if (!wantsHelp) {
 			throw error;
