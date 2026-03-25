@@ -155,6 +155,37 @@ Validation rules:
 - at least one scope is required: `--user-uri` or `--organization-uri` (same in `--raw` mode)
 - `--count` is optional; when set, it must be an integer between 1 and 100
 
+### Create Event Type
+
+```bash
+calendly create-event-type \
+  --user-uri "https://api.calendly.com/users/<USER_UUID>" \
+  --name "CLI Smoke Test" \
+  --duration 30 \
+  --active false \
+  --location-kind zoom_conference \
+  -o json
+```
+
+Validation and behavior:
+- requires exactly one owner source: `--user-uri`, `--team-uri`, or `--raw {"owner":"..."}`
+- requires `--name`
+- requires at least one duration source: `--duration` or repeated `--duration-option`
+- when both `--duration` and `--duration-option` values are provided, `--duration` must match one of the declared duration options
+- `--active` requires explicit `true` or `false`; when omitted, Calendly's API default applies
+- `--color` must be a 6-digit hex color (example: `#fff200`)
+- `--locale` must be one of `de|en|es|fr|it|nl|pt|uk`
+- `--location-kind` supports Calendly's documented location kinds; `--location`, `--location-additional-info`, and `--location-phone-number` apply to that single location entry
+- `--raw` JSON supports advanced payloads such as `owner`, `duration_options`, full `locations` arrays, and `team_uri`
+- this command currently ships only documented create fields; issue-body flags like `--slug`, `--secret`, and buffer settings are intentionally not supported yet
+
+Response shape:
+- `query.owner`
+- `query.name`
+- optional normalized fields such as `duration`, `duration_options`, `locations`, `color`, and `locale`
+- `meta.created`
+- `resource` with the created event type details when Calendly returns a resource payload
+
 ### Get Event Type Details
 
 ```bash
@@ -321,6 +352,7 @@ Signing secret handling guidance:
 - `list-events` - List scheduled events (`--include-invitees` for expand + bounded fallback invitee hydration)
 - `list-events-with-invitees` - Compatibility alias for include-invitees path
 - `get-event` - Get event details
+- `create-event-type` - Create a new solo event type (requires one owner source plus duration configuration)
 - `list-event-types` - List available event types for scheduling (requires at least one of `--user-uri` or `--organization-uri`)
 - `get-event-type` - Get details for a specific event type (requires `--event-type-uri`)
 - `update-event-type` - Update mutable event type metadata (`--event-type-uri` primary, `--event-type-uuid` alias, supports `--dry-run`)
@@ -367,6 +399,7 @@ Then use in conversations:
 
 - `schedule-event` requires a paid Calendly plan (Standard or higher). Free plans receive `403`.
 - `reschedule-event` requires paid-plan API access and can fail with clear messages for invalid identifiers, unavailable target slots, or payload validation.
+- `create-event-type` mutates Calendly configuration and should be smoke-tested with a clearly labeled inactive event type when possible.
 - `update-event-type` mutates Calendly configuration. Use `--dry-run` first, then validate against a disposable test event type and revert the changed field after smoke testing.
 - Safe error messages are returned for common failures: invalid event type, unavailable slot, custom question validation, and plan restrictions.
 - For the most reliable bookings, fetch slots first via `get-event-type-availability` and then schedule exactly one returned `start_time`.
