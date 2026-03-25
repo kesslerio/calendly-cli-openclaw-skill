@@ -102,6 +102,15 @@ describe('normalizeUpdateEventTypeQuery', () => {
 			})
 		).toThrow('active must be true or false');
 	});
+
+	test('rejects uuid aliases containing reserved uri delimiters', () => {
+		expect(() =>
+			normalizeUpdateEventTypeQuery({
+				eventTypeUuid: 'ET_123?foo=bar',
+				duration: 30,
+			})
+		).toThrow('event_type_uuid must be a Calendly event type id segment, not a URI');
+	});
 });
 
 describe('update event type payload builders', () => {
@@ -235,6 +244,16 @@ describe('toSafeUpdateEventTypeError', () => {
 			)
 		).toBe(
 			'Calendly only allows updating solo event types through this endpoint. Team, collective, and round-robin event types are not supported.'
+		);
+
+		expect(
+			toSafeUpdateEventTypeError(
+				new Error(
+					'event_type_uri must include an event type UUID (example: https://api.calendly.com/event_types/AAAAAAAAAAAAAAAA)'
+				)
+			)
+		).toBe(
+			'event_type_uri must include an event type UUID (example: https://api.calendly.com/event_types/AAAAAAAAAAAAAAAA)'
 		);
 
 		expect(toSafeUpdateEventTypeError(new Error('something unexpected happened'))).toBe(

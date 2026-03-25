@@ -44,7 +44,7 @@ const HANDWRITTEN_COMMANDS = new Set([
 	'reschedule_event',
 ]);
 
-function detectCommand(argv: string[]): string | undefined {
+export function detectCommand(argv: string[]): string | undefined {
 	for (let index = 2; index < argv.length; index += 1) {
 		const token = argv[index];
 		if (!token) {
@@ -76,6 +76,23 @@ function detectCommand(argv: string[]): string | undefined {
 
 function hasHelpFlag(argv: string[]): boolean {
 	return argv.slice(2).some((token) => token === '-h' || token === '--help' || token === 'help');
+}
+
+export function shouldShowGlobalHelp(command: string | undefined): boolean {
+	return command === 'help' || !command;
+}
+
+class InterceptedExit extends Error {
+	constructor(public readonly code: number) {
+		super(`Intercepted process.exit(${code})`);
+	}
+}
+
+function printHandwrittenHelpAddendum(): void {
+	console.log('\nHandwritten extensions:');
+	console.log(
+		'  update-event-type (--event-type-uri <event-type-uri> | --event-type-uuid <event-type-uuid>) [--name <name>] [--description <description>] [--duration <duration:number>] [--active <active:boolean>] [--secret <secret:boolean>] [--dry-run] [--raw <json>]'
+	);
 }
 
 async function registerHandwrittenCommands(program: ReturnType<typeof createProgram>): Promise<void> {
@@ -121,32 +138,52 @@ async function registerHandwrittenCommands(program: ReturnType<typeof createProg
 	organizationMemberships.registerOrganizationMembershipCommands(program);
 }
 
+async function runGeneratedCliWithInterceptedExit(): Promise<void> {
+	const { runCli: runGeneratedCli } = await import('../generated/cli');
+	const originalExit = process.exit.bind(process);
+	const originalExitCode = process.exitCode;
+	const interceptedExit = ((code?: string | number | null | undefined): never => {
+		const normalizedCode = typeof code === 'number' ? code : Number.parseInt(String(code ?? 0), 10) || 0;
+		throw new InterceptedExit(normalizedCode);
+	}) as typeof process.exit;
+
+	process.exit = interceptedExit;
+	try {
+		await runGeneratedCli();
+	} catch (error) {
+		if (!(error instanceof InterceptedExit) || error.code !== 0) {
+			throw error;
+		}
+	} finally {
+		process.exit = originalExit;
+		process.exitCode = originalExitCode;
+	}
+}
+
 export async function runCli(): Promise<void> {
 	const command = detectCommand(process.argv);
 	const wantsHelp = hasHelpFlag(process.argv);
-	const isGlobalHelp =
-		command === 'help' || !command || (wantsHelp && (command.startsWith('-') || !HANDWRITTEN_COMMANDS.has(command)));
+	const isGlobalHelp = shouldShowGlobalHelp(command);
 	if (isGlobalHelp) {
-		const program = createProgram();
 		try {
-			await registerHandwrittenCommands(program);
-			program.outputHelp();
+			await runGeneratedCliWithInterceptedExit();
+			printHandwrittenHelpAddendum();
 			return;
 		} catch {
+			const program = createProgram();
 			try {
-				const { runCli: runGeneratedCli } = await import('../generated/cli');
-				await runGeneratedCli();
-				return;
+				await registerHandwrittenCommands(program);
+				program.outputHelp();
 			} catch {
 				program.outputHelp();
-				console.error('\nNote: Full command set is unavailable because generated CLI dependencies are missing.');
-				console.error('Install runtime deps (e.g. mcporter) to restore all generated commands.');
-				return;
 			}
+			console.error('\nNote: Full command set is unavailable because generated CLI dependencies are missing.');
+			console.error('Install runtime deps (e.g. mcporter) to restore all generated commands.');
+			return;
 		}
 	}
 
-	if (!command || command.startsWith('-') || !HANDWRITTEN_COMMANDS.has(command)) {
+	if (!command || !HANDWRITTEN_COMMANDS.has(command)) {
 		try {
 			const { runCli: runGeneratedCli } = await import('../generated/cli');
 			await runGeneratedCli();
@@ -158,6 +195,15 @@ export async function runCli(): Promise<void> {
 	}
 
 	const program = createProgram();
-	await registerHandwrittenCommands(program);
-	await program.parseAsync(process.argv);
+	try {
+		await registerHandwrittenCommands(program);
+		await program.parseAsync(process.argv);
+	} catch (error) {
+		if (!wantsHelp) {
+			throw error;
+		}
+		program.outputHelp();
+		console.error('\nNote: Full handwritten command help is unavailable because handwritten command modules could not load.');
+		console.error('Install runtime deps (e.g. mcporter) to restore full handwritten help output.');
+	}
 }

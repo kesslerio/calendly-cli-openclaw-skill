@@ -90,7 +90,7 @@ function normalizeOptionalEventTypeUuid(value: unknown): string | undefined {
 	if (!normalized) {
 		return undefined;
 	}
-	if (normalized.includes('/')) {
+	if (!/^[A-Za-z0-9_-]+$/.test(normalized)) {
 		throw new Error('event_type_uuid must be a Calendly event type id segment, not a URI');
 	}
 	return normalized;
@@ -239,6 +239,7 @@ export function toSafeUpdateEventTypeError(error: unknown): string {
 	if (
 		message.includes('event_type_uri or event_type_uuid is required') ||
 		message.includes('event_type_uri and event_type_uuid must refer to the same event type') ||
+		message.includes('event_type_uri must include an event type UUID') ||
 		message.includes('event_type_uuid must be a Calendly event type id segment') ||
 		message.includes('at least one mutable field is required') ||
 		message.includes('must be a non-empty string') ||

@@ -302,6 +302,8 @@ export function registerEventTypeCommands(program: Command): void {
 							return;
 						}
 					}
+					printMcpResult(mcpResult, globalOptions.output ?? 'text');
+					return;
 				} catch (error) {
 					mcpErrorMessage = error instanceof Error ? error.message : String(error);
 				} finally {
@@ -315,10 +317,6 @@ export function registerEventTypeCommands(program: Command): void {
 				const restResult = await fetchUpdateEventTypeResult(query, timeout);
 				printResult(restResult, globalOptions.output ?? 'text');
 			} catch (error) {
-				if (mcpResult !== undefined) {
-					printMcpResult(mcpResult, globalOptions.output ?? 'text');
-					return;
-				}
 				let message = toSafeUpdateEventTypeError(error);
 				if (mcpErrorMessage) {
 					message = `${message} (MCP tool fallback failed: ${mcpErrorMessage})`;
