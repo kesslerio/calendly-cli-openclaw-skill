@@ -3,6 +3,14 @@ import { Command } from 'commander';
 import { normalizeEventTypeAvailabilityQuery, shapeEventTypeAvailabilityResult } from '../event-type-availability';
 import { extractEventTypeUuid, normalizeGetEventTypeQuery, shapeGetEventTypeResult } from '../get-event-type';
 import { normalizeListEventTypesQuery, shapeListEventTypesResult, toListEventTypesMcpArgs } from '../list-event-types';
+import {
+	normalizeUpdateEventTypeQuery,
+	shapeUpdateEventTypeDryRun,
+	shapeUpdateEventTypeResult,
+	toSafeUpdateEventTypeError,
+	toUpdateEventTypeMcpArgs,
+	toUpdateEventTypeRestBody,
+} from '../update-event-type';
 import { printResult } from './output';
 import { ensureRuntime, getServerProxy, invokeWithTimeout, printMcpResult, SERVER_NAME } from './runtime';
 
@@ -22,16 +30,36 @@ function parseIntegerFlag(value: string, optionName: string): number {
 	return Number.parseInt(trimmed, 10);
 }
 
-async function calendlyGet(url: string, apiKey: string, timeout: number): Promise<unknown> {
+function parseBooleanFlag(value: string, optionName: string): boolean {
+	const normalized = String(value).trim().toLowerCase();
+	if (normalized === 'true') {
+		return true;
+	}
+	if (normalized === 'false') {
+		return false;
+	}
+	throw new Error(`Invalid ${optionName} value "${value}". Use true or false.`);
+}
+
+async function calendlyRequest(
+	url: string,
+	apiKey: string,
+	timeout: number,
+	init?: RequestInit
+): Promise<unknown> {
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), timeout);
 	try {
 		const response = await fetch(url, {
+			...init,
 			headers: {
 				Authorization: `Bearer ${apiKey}`,
 				'Content-Type': 'application/json',
+				...(init?.headers ?? {}),
 			},
 			signal: controller.signal,
+			method: init?.method,
+			body: init?.body,
 		});
 
 		const text = await response.text();
@@ -53,6 +81,10 @@ async function calendlyGet(url: string, apiKey: string, timeout: number): Promis
 	} finally {
 		clearTimeout(timer);
 	}
+}
+
+async function calendlyGet(url: string, apiKey: string, timeout: number): Promise<unknown> {
+	return await calendlyRequest(url, apiKey, timeout);
 }
 
 async function fetchGetEventTypeResult(query: Record<string, unknown>, timeout: number): Promise<unknown> {
@@ -91,6 +123,21 @@ async function fetchEventTypeAvailabilityResult(query: Record<string, unknown>, 
 
 	const data = await calendlyGet(`https://api.calendly.com/event_type_available_times?${params.toString()}`, apiKey, timeout);
 	return shapeEventTypeAvailabilityResult(data as Record<string, unknown>, query as any);
+}
+
+async function fetchUpdateEventTypeResult(query: Record<string, unknown>, timeout: number): Promise<unknown> {
+	const apiKey = requireApiKey();
+	const eventTypeUuid = String(query.event_type_uuid);
+	const data = await calendlyRequest(
+		`https://api.calendly.com/event_types/${encodeURIComponent(eventTypeUuid)}`,
+		apiKey,
+		timeout,
+		{
+			method: 'PATCH',
+			body: JSON.stringify(toUpdateEventTypeRestBody(query as any)),
+		}
+	);
+	return shapeUpdateEventTypeResult(data as Record<string, unknown>, query as any);
 }
 
 export function registerEventTypeCommands(program: Command): void {
@@ -205,6 +252,85 @@ export function registerEventTypeCommands(program: Command): void {
 			}
 		})
 		.addHelpText('after', () => '\nExample:\n  ' + './calendly get-event-type --event-type-uri https://api.calendly.com/event_types/ET_123');
+
+	program
+		.command('update-event-type')
+		.summary('update-event-type (--event-type-uri <event-type-uri> | --event-type-uuid <event-type-uuid>) [--name <name>] [--description <description>] [--duration <duration:number>] [--active <active:boolean>] [--secret <secret:boolean>] [--dry-run] [--raw <json>]')
+		.description('Update mutable event type metadata')
+		.usage('(--event-type-uri <event-type-uri> | --event-type-uuid <event-type-uuid>) [--name <name>] [--description <description>] [--duration <duration:number>] [--active <active:boolean>] [--secret <secret:boolean>] [--dry-run] [--raw <json>]')
+		.option('--raw <json>', 'Provide raw JSON arguments to the tool, bypassing flag parsing.')
+		.option('--event-type-uri <event-type-uri>', 'Primary Calendly event type URI to update')
+		.option('--event-type-uuid <event-type-uuid>', 'Compatibility alias for the event type id segment')
+		.option('--name <name>', 'Updated event type display name')
+		.option('--description <description>', 'Updated event type description')
+		.option('--duration <duration:number>', 'Updated event duration in minutes (15-480)', (value) => parseIntegerFlag(value, 'duration'))
+		.option('--active <active:boolean>', 'Whether the event type is active (true or false)', (value) => parseBooleanFlag(value, 'active'))
+		.option('--secret <secret:boolean>', 'Whether the event type is secret (true or false)', (value) => parseBooleanFlag(value, 'secret'))
+		.option('--dry-run', 'Show normalized patch payload without sending MCP or REST requests')
+		.alias('update_event_type')
+		.action(async (cmdOpts) => {
+			const globalOptions = program.opts();
+			const timeout = globalOptions.timeout || 30000;
+			const rawArgs = cmdOpts.raw ? JSON.parse(cmdOpts.raw) : ({} as Record<string, unknown>);
+			let query: Record<string, unknown>;
+			try {
+				query = normalizeUpdateEventTypeQuery(cmdOpts, rawArgs) as unknown as Record<string, unknown>;
+			} catch (error) {
+				console.error(`Error: ${toSafeUpdateEventTypeError(error)}`);
+				process.exit(1);
+				return;
+			}
+
+			if (Boolean(query.dry_run)) {
+				printResult(shapeUpdateEventTypeDryRun(query as any), globalOptions.output ?? 'text');
+				return;
+			}
+
+			let mcpResult: unknown;
+			let mcpErrorMessage: string | undefined;
+			try {
+				const runtime = await ensureRuntime();
+				const proxy = getServerProxy(runtime) as any;
+				try {
+					const call = proxy.updateEventType(toUpdateEventTypeMcpArgs(query as any));
+					mcpResult = await invokeWithTimeout(call, timeout);
+					const mcpRaw = createCallResult(mcpResult).raw as Record<string, unknown> | undefined;
+					if (mcpRaw) {
+						const shaped = shapeUpdateEventTypeResult(mcpRaw, query as any);
+						if (shaped.resource) {
+							printResult(shaped, globalOptions.output ?? 'text');
+							return;
+						}
+					}
+					printMcpResult(mcpResult, globalOptions.output ?? 'text');
+					return;
+				} catch (error) {
+					mcpErrorMessage = error instanceof Error ? error.message : String(error);
+				} finally {
+					await runtime.close(SERVER_NAME).catch(() => {});
+				}
+			} catch (error) {
+				mcpErrorMessage = error instanceof Error ? error.message : String(error);
+			}
+
+			try {
+				const restResult = await fetchUpdateEventTypeResult(query, timeout);
+				printResult(restResult, globalOptions.output ?? 'text');
+			} catch (error) {
+				let message = toSafeUpdateEventTypeError(error);
+				if (mcpErrorMessage) {
+					message = `${message} (MCP tool fallback failed: ${mcpErrorMessage})`;
+				}
+				console.error(`Error: ${message}`);
+				process.exit(1);
+			}
+		})
+		.addHelpText(
+			'after',
+			() =>
+				'\nExample:\n  ' +
+				'./calendly update-event-type --event-type-uri https://api.calendly.com/event_types/ET_123 --duration 30 --active true --dry-run'
+		);
 
 	program
 		.command('get-event-type-availability')

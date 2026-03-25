@@ -39,6 +39,7 @@ calendly cancel-event --event-uuid <UUID> --reason "Rescheduling needed"
 - `get-event` - Get event details (requires --event-uuid)
 - `list-event-types` - List schedulable event types (requires `--user-uri` or `--organization-uri`; optional `--count`)
 - `get-event-type` - Get event type details (requires `--event-type-uri`)
+- `update-event-type` - Update mutable event type metadata (`--event-type-uri` primary, `--event-type-uuid` alias, supports `--dry-run`)
 - `get-event-type-availability` - Get available slots for an event type (`--event-type-uri`, `--start-time`, `--end-time`; optional `--timezone`)
 - `schedule-event` - Schedule a meeting by booking an invitee into an event type
 - `reschedule-event` - Reschedule an existing meeting to a new start time using event/invitee identifiers
@@ -123,6 +124,20 @@ calendly get-event \
 # Get event type details
 calendly get-event-type \
   --event-type-uri "https://api.calendly.com/event_types/<EVENT_TYPE_UUID>" \
+  -o json
+
+# Update event type metadata
+calendly update-event-type \
+  --event-type-uri "https://api.calendly.com/event_types/<EVENT_TYPE_UUID>" \
+  --duration 30 \
+  --active true \
+  -o json
+
+# Dry-run without applying
+calendly update-event-type \
+  --event-type-uuid "<EVENT_TYPE_UUID>" \
+  --description "Updated invitee-facing description" \
+  --dry-run \
   -o json
 
 # Get event type availability
@@ -215,9 +230,16 @@ Validation behavior:
 - When `--new-end-time` or `--event-type` is omitted, CLI derives values from the current scheduled event during REST fallback
 - REST fallback payload maps to Calendly rescheduling fields: `event_type`, `event_start_time`, `event_end_time`, and optional `reason`
 
+`update-event-type` updates only explicitly provided mutable fields:
+- Identifier: `--event-type-uri` or `--event-type-uuid`
+- Mutable fields: `--name`, `--description`, `--duration`, `--active`, `--secret`
+- Validation: `duration` must be an integer between 15 and 480; boolean fields require explicit `true` or `false`
+- Safety: `--dry-run` returns the normalized patch payload without sending MCP or REST requests
+
 Plan and availability notes:
 - Paid Calendly plan (Standard or higher) is required; free plans return `403`.
 - To reduce booking conflicts, call `get-event-type-availability` first and pass one returned slot `start_time`.
+- For live smoke tests of `update-event-type`, use a disposable event type and restore the original field value after confirming the update succeeded.
 
 ## Important: Time Filtering
 

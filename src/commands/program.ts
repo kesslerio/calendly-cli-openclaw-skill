@@ -21,6 +21,8 @@ const commandSignatures: Record<string, string> = {
 	'refresh-access-token': 'function refresh_access_token(refresh_token: string);',
 	'list-event-types': 'function list_event_types(user?: string, organization?: string, count?: number);',
 	'get-event-type': 'function get_event_type(event_type: string);',
+	'update-event-type':
+		'function update_event_type(event_type: string, name?: string, description?: string, duration?: number, active?: boolean, secret?: boolean, dry_run?: boolean);',
 	'get-event-type-availability':
 		'function get_event_type_availability(event_type: string, start_time: string, end_time: string, timezone?: string);',
 	'get-event': 'function get_event(event_uuid: string);',
@@ -46,12 +48,20 @@ export function createProgram(): Command {
 	program.description('calendly-mcp-server');
 	program.option('-t, --timeout <ms>', 'Call timeout in milliseconds', (value) => parseInt(value, 10), 30000);
 	program.option('-o, --output <format>', 'Output format: text|markdown|json|raw', 'text');
-	program.configureHelp({
-		subcommandTerm(cmd: Command) {
-			const term = cmd.name();
-			return commandSignatures[term] ?? cmd.name();
-		},
-	});
-	program.showSuggestionAfterError(true);
+	const configurableProgram = program as Command & {
+		configureHelp?: (configuration: { subcommandTerm(cmd: Command): string }) => void;
+		showSuggestionAfterError?: (enabled?: boolean) => Command;
+	};
+	if (typeof configurableProgram.configureHelp === 'function') {
+		configurableProgram.configureHelp({
+			subcommandTerm(cmd: Command) {
+				const term = cmd.name();
+				return commandSignatures[term] ?? cmd.name();
+			},
+		});
+	}
+	if (typeof configurableProgram.showSuggestionAfterError === 'function') {
+		configurableProgram.showSuggestionAfterError(true);
+	}
 	return program;
 }
