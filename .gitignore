@@ -38,3 +38,6 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# Local review tooling
+compound-engineering.local.md
