@@ -75,12 +75,12 @@ Override it with `bun run install:path -- --bin-dir /your/bin/dir`.
 API key can be stored in your environment or `.env` file:
 ```bash
 export CALENDLY_API_KEY="<your-pat-token>"
-# Or in ~/.moltbot/.env or ~/.clawdbot/.env
+# Or in legacy ~/.moltbot/.env / ~/.clawdbot/.env
 ```
 
 Get your Personal Access Token from: https://calendly.com/integrations/api_webhooks
 
-## Usage in Moltbot
+## Usage in OpenClaw
 
 When user asks about:
 - "What meetings do I have?" → `list-events` with `--min-start-time` (use recent date!)

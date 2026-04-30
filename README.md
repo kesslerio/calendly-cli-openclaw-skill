@@ -1,6 +1,6 @@
-# Calendly Moltbot Skill
+# Calendly OpenClaw Skill
 
-Moltbot skill for Calendly integration. List events, check availability, manage meetings via the Calendly API.
+OpenClaw skill for Calendly integration. List events, check availability, manage meetings via the Calendly API.
 
 ## Features
 
@@ -371,15 +371,15 @@ Signing secret handling guidance:
 - `exchange-code-for-tokens` - Exchange authorization code for tokens
 - `refresh-access-token` - Refresh access token
 
-## Integration with Moltbot
+## Integration with OpenClaw
 
-Add to your Moltbot skills configuration:
+Add to your OpenClaw skills configuration:
 
 ```bash
-# Copy or symlink to your Moltbot skills directory
+# Copy or symlink to your OpenClaw skills directory
 ln -s $(pwd) /path/to/your/moltbot/skills/calendly
 
-# Or add to your moltbot.json config:
+# Or add to your legacy moltbot.json config:
 {
   "skills": [
     {
@@ -389,6 +389,8 @@ ln -s $(pwd) /path/to/your/moltbot/skills/calendly
   ]
 }
 ```
+
+The `/path/to/your/moltbot` path, `moltbot.json` filename, and `calendly-moltbot-skill` repository slug are legacy compatibility names.
 
 Then use in conversations:
 - "What meetings do I have?"
@@ -440,4 +442,4 @@ MIT
 
 - MCP Server: [meAmitPatil/calendly-mcp-server](https://github.com/meAmitPatil/calendly-mcp-server)
 - CLI Generator: [mcporter](https://github.com/steipete/mcporter)
-- Moltbot: [moltbot.io](https://moltbot.io)
+- OpenClaw: [legacy Moltbot docs](https://moltbot.io)
