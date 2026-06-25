@@ -42,3 +42,5 @@ Thumbs.db
 # Local review tooling
 compound-engineering.local.md
 .context/compound-engineering/feature-video/
+.ai/
+.worktrees/
